@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Alleen eigen bestanden, en verbinding alleen met GitHub (voor de telefoon). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Mealplanning</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍲</text></svg>">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icoon-180.png">
+  <meta name="apple-mobile-web-app-title" content="Mealplanning">
+  <meta name="theme-color" content="#2f6b4f">
+  <link rel="stylesheet" href="css/stijl.css">
+</head>
+<body>
+  <header class="balk">
+    <a class="logo" href="#/">Mealplanning</a>
+    <nav>
+      <a href="#/" data-nav="recepten">Recepten</a>
+      <a href="#/menu" data-nav="menu">Wat eten we?</a>
+      <a href="#/boodschappen" data-nav="boodschappen">Boodschappen</a>
+      <a href="#/voorraad" data-nav="voorraad">Voorraad</a>
+      <a href="#/logboek" data-nav="logboek">Logboek</a>
+      <a href="#/ingredienten" data-nav="ingredienten">Ingrediënten</a>
+      <a href="#/telefoon" data-nav="telefoon">Telefoon</a>
+    </nav>
+  </header>
+  <div id="verbinding" hidden></div>
+  <div id="problemen"></div>
+  <main></main>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
