@@ -143,13 +143,12 @@ input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 2px 
 .k-knoppen .knop { flex: 1; }
 .knop.groot { padding: 14px 20px; font-size: 1.1rem; }
 
-/* weekrooster: dagen naast elkaar, per dag ontbijt / lunch / avondeten / tussendoor.
-   Smaller dan 900px: de dagen onder elkaar, elk als eigen kaart. */
-main:has(.weekrooster) { max-width: 1440px; }
+/* weekrooster: dagen naast elkaar (aantal = --dagen, gezet in menu.js), per dag ontbijt / lunch /
+   avondeten / tussendoor. Smaller dan 900px: de dagen onder elkaar, elk als eigen kaart. */
 .weeknav { display: flex; gap: 4px; }
 .planknop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 14px; }
 .weekrooster {
-  display: grid; grid-template-columns: auto repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(5, auto);
+  display: grid; grid-template-columns: auto repeat(var(--dagen, 4), minmax(0, 1fr)); grid-template-rows: repeat(5, auto);
   gap: 0 8px; margin-bottom: 14px;
 }
 .wr-labels, .wr-dag { display: grid; grid-template-rows: subgrid; grid-row: span 5; }
@@ -557,6 +556,17 @@ legend { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; co
 .b-detail { color: var(--zacht); flex-basis: 100%; padding-left: 28px; order: 3; }
 .b-acties { display: flex; gap: 4px; margin-left: auto; }
 .b-item.af .b-naam, .b-item.af .b-hv { text-decoration: line-through; color: var(--zacht); }
+.b-aantal {
+  flex-basis: 100%; order: 4; padding-left: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: .85rem; color: var(--zacht);
+}
+.b-aantal input, .b-aantal select {
+  font: inherit; color: var(--inkt); background: var(--kaart);
+  border: 1px solid var(--lijn); border-radius: 8px; padding: 3px 8px;
+}
+.b-aantal input { width: 5.5em; text-align: right; }
+.b-aantal .stapper { width: 28px; height: 28px; font-size: 1rem; }
+.b-aantal small { color: var(--accent); }
 .b-klaar { margin: 20px 0; }
 .b-inhuis { margin-top: 28px; }
 .b-inhuis summary { cursor: pointer; font: 400 1.2rem var(--serif); margin-bottom: 8px; }

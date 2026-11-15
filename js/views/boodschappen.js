@@ -1,6 +1,6 @@
 import { wijzig } from "../store.js";
-import { boodschappenlijst, inVerpakkingen, inVoorraad, prijsVan, sleutelExtra, soortVan, standaardPlek, teKoken,
-  toonHoeveelheid, toonPartijen, verpakkingVan } from "../planning.js";
+import { boodschappenlijst, inVerpakkingen, inVoorraad, prijsVan, rond, sleutelExtra, soortVan, standaardPlek, teKoken,
+  toonHoeveelheid, toonPartijen, verpakkingVan, voorraadEenheden } from "../planning.js";
 import { breuk, datumNl, esc, euro, groepNaam, melding, nieuwId, nl, vandaag } from "../util.js";
 import { ingredientKeuzelijst, vindIngredient } from "./voorraad.js";
 
@@ -19,9 +19,14 @@ export function boodschappen(main, data) {
   const lijst = boodschappenlijst(data);
   const af = new Set(data.boodschappen.afgevinkt);
   const gerechten = teKoken(data);
+  const e = data.eenheden;
+  // Zelf aangepaste hoeveelheid bij iets dat afgevinkt is ("2 potten gekocht in plaats van 1").
+  const aangepast = (sleutel) => {
+    const q = af.has(sleutel) && data.boodschappen.gekocht?.[sleutel];
+    return q ? [q] : null;
+  };
 
   // Alles wat je moet kopen: uit de recepten, plus wat je zelf hebt toegevoegd.
-  const e = data.eenheden;
   const rijen = [
     ...lijst.filter((x) => x.status === "kopen").map((x) => {
       // In hele verpakkingen als het ingrediënt een verpakking heeft: "2 blokken (1kg nodig)".
@@ -29,7 +34,8 @@ export function boodschappen(main, data) {
       // Op en verder niets nodig: één verpakking (als bekend is hoe je het koopt).
       const alleenOp = x.opgemaakt && !x.rest.length;
       if (alleenOp && verpakkingVan(x.ing, e)) pak = { hoeveelheid: 1, eenheid: verpakkingVan(x.ing, e)[0] };
-      const gekocht = pak ? [pak] : x.rest;
+      const standaard = pak ? [pak] : x.rest;
+      const gekocht = aangepast(x.sleutel) || standaard;
       const waarom = [
         x.recepten.size && [...x.recepten].join(", "),
         x.minimum && `vaste voorraad: minstens ${toonHoeveelheid([x.minimum], e, x.ing)}`,
@@ -37,7 +43,7 @@ export function boodschappen(main, data) {
         x.opgemaakt && `op sinds ${datumNl(x.opgemaakt)}`,
       ].filter(Boolean).join(" · ");
       return {
-        sleutel: x.sleutel, slug: x.slug, ing: x.ing, naam: x.ing.naam, groep: x.ing.groep, gekocht,
+        sleutel: x.sleutel, slug: x.slug, ing: x.ing, naam: x.ing.naam, groep: x.ing.groep, gekocht, standaard,
         later: x.later, prijs: prijsVan(gekocht, x.ing, e), bijnaOp: x.bijnaOp != null, alleenOp,
         hv: x.bijnaOp != null ? "bijna op?" : alleenOp ? (pak ? toonHoeveelheid([pak], e) : "is op")
           : pak ? `${toonHoeveelheid([pak], e)} (${toonHoeveelheid(x.rest, e, x.ing)} nodig)` : toonHoeveelheid(x.rest, e, x.ing),
@@ -48,8 +54,10 @@ export function boodschappen(main, data) {
     }),
     ...data.boodschappen.extra.map((x) => {
       const ing = data.ingredienten[x.ingredient];
+      const gekocht = aangepast(sleutelExtra(x.id)) || [];
       return { sleutel: sleutelExtra(x.id), extraId: x.id, slug: ing ? x.ingredient : null, ing,
-        naam: x.naam, groep: ing?.groep || ZONDER_GROEP, gekocht: [], hv: "", detail: "" };
+        naam: x.naam, groep: ing?.groep || ZONDER_GROEP, gekocht, standaard: [], hv: "", detail: "",
+        prijs: ing ? prijsVan(gekocht, ing, e) : null };
     }),
   ];
   const inHuis = lijst.filter((x) => x.status !== "kopen");
@@ -64,11 +72,29 @@ export function boodschappen(main, data) {
   const totaal = metPrijs.reduce((s, r) => s + r.prijs, 0);
   const onderdelen = lijst.onderdelen.reduce((m, o) => m.set(o.recept, (m.get(o.recept) || 0) + o.keer), new Map());
 
+  // Bij een afgevinkt ingrediënt: hoeveel je echt gekocht hebt (gaat zo de voorraad in).
+  // Leeg = wat er op de lijst stond (of "genoeg in huis" als daar geen hoeveelheid bij stond).
+  const aantalHtml = (r) => {
+    const q = r.gekocht.length === 1 ? r.gekocht[0] : null;
+    const eenheid = q?.eenheid || verpakkingVan(r.ing, e)?.[0] || (r.ing.gram_per?.stuk || r.ing.per_stuk ? "stuk" : "g");
+    const opties = voorraadEenheden(e).filter((u) => u === eenheid || ["g", "kg", "ml", "l"].includes(u)
+      || r.ing.gram_per?.[u] != null || (u === "stuk" && r.ing.per_stuk));
+    const leeg = r.standaard.length ? toonHoeveelheid(r.standaard, e, r.ing) : "genoeg";
+    return `<span class="b-aantal">gekocht:
+      <button type="button" class="stapper" data-aantal="-1" aria-label="Minder">−</button>
+      <input type="number" min="0" step="any" inputmode="decimal" value="${q ? rond(q.hoeveelheid, q.eenheid, e) : ""}" placeholder="${esc(leeg)}" aria-label="Hoeveel gekocht">
+      <button type="button" class="stapper" data-aantal="1" aria-label="Meer">+</button>
+      <select aria-label="Eenheid">${opties.map((u) => `<option ${u === eenheid ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>
+      ${data.boodschappen.gekocht?.[r.sleutel] ? `<small>aangepast</small>` : ""}
+    </span>`;
+  };
+
   const rijHtml = (r) => `<li class="b-item${af.has(r.sleutel) ? " af" : ""}" data-sleutel="${esc(r.sleutel)}">
     <label class="b-vink"><input type="checkbox" ${af.has(r.sleutel) ? "checked" : ""}>
       <span class="b-naam">${esc(r.naam)}</span>${r.hv ? ` <span class="b-hv">${esc(r.hv)}</span>` : ""}</label>
     ${r.prijs != null ? `<span class="b-prijs">±${esc(euro(r.prijs))}</span>` : ""}
     ${r.detail ? `<small class="b-detail">${esc(r.detail)}</small>` : ""}
+    ${af.has(r.sleutel) && r.ing ? aantalHtml(r) : ""}
     <span class="b-acties">
       ${r.bijnaOp ? `<button class="knop klein" data-genoeg title="Er is nog genoeg: de app begint opnieuw met tellen">nog genoeg</button>`
         : r.alleenOp ? `<button class="knop klein" data-nietnodig title="Niet opnieuw kopen">niet nodig</button>`
@@ -114,8 +140,41 @@ export function boodschappen(main, data) {
       const s = new Set(doc.afgevinkt.filter((k) => huidige.has(k)));
       if (cb.checked) s.add(sleutel); else s.delete(sleutel);
       doc.afgevinkt = [...s];
+      // Aangepaste hoeveelheden alleen bij wat (nog) afgevinkt is.
+      if (doc.gekocht) {
+        for (const k of Object.keys(doc.gekocht)) if (!s.has(k)) delete doc.gekocht[k];
+        if (!Object.keys(doc.gekocht).length) delete doc.gekocht;
+      }
     }).then(herteken, fout);
   }));
+
+  // Hoeveelheid gekocht aanpassen. Gelijk aan wat op de lijst stond = niet aangepast.
+  main.querySelectorAll(".b-aantal").forEach((el) => {
+    const sleutel = el.closest("li").dataset.sleutel;
+    const r = rijen.find((x) => x.sleutel === sleutel);
+    const invoer = el.querySelector("input");
+    const keuze = el.querySelector("select");
+    const bewaar = () => {
+      const hv = invoer.value === "" ? null : Number(invoer.value.replace(",", "."));
+      const q = hv > 0 ? { hoeveelheid: hv, eenheid: keuze.value } : null;
+      const zoalsLijst = q && r.standaard.length === 1 && r.standaard[0].eenheid === q.eenheid
+        && Math.abs(r.standaard[0].hoeveelheid - q.hoeveelheid) < 1e-6;
+      wijzig("boodschappen", (doc) => {
+        doc.gekocht ||= {};
+        if (q && !zoalsLijst) doc.gekocht[sleutel] = q; else delete doc.gekocht[sleutel];
+        if (!Object.keys(doc.gekocht).length) delete doc.gekocht;
+      }).then(herteken, fout);
+    };
+    // Stapjes: hele stuks/verpakkingen, 50 g/ml, of een halve kg/l.
+    const stap = () => ({ g: 50, ml: 50, kg: 0.5, l: 0.5 })[keuze.value] || 1;
+    el.querySelectorAll("[data-aantal]").forEach((b) => b.addEventListener("click", () => {
+      const nu = Number(invoer.value.replace(",", ".")) || 0;
+      invoer.value = Math.max(0, Math.round((nu + Number(b.dataset.aantal) * stap()) * 100) / 100) || "";
+      bewaar();
+    }));
+    invoer.addEventListener("change", bewaar);
+    keuze.addEventListener("change", bewaar);
+  });
 
   // "heb ik al": in de voorraad als genoeg in huis
   main.querySelectorAll("[data-heb]").forEach((b) => b.addEventListener("click", () => {
@@ -187,6 +246,7 @@ export function boodschappen(main, data) {
         const weg = new Set(gekocht.map((r) => r.sleutel));
         doc.extra = doc.extra.filter((x) => !weg.has(sleutelExtra(x.id)));
         doc.afgevinkt = [];
+        delete doc.gekocht;
       });
       melding("In de voorraad gezet");
       herteken(d);

@@ -10,6 +10,10 @@ import { huidigVoorstel, koppelVoorstel, planDialoog, voorstelBalk, voorstelTege
 // Keuzes blijven bewaard zolang de pagina open is.
 const f = { sortering: "lang", categorie: "alle", vegetarisch: false, aantal: 9, week: null };
 const STAP = 9;
+// Op een smal scherm staan de dagen onder elkaar (een week); breder staan ze naast elkaar,
+// dan passen er 4 op de pagina. Over de grens heen (venster smaller/breder): opnieuw tekenen.
+const SMAL = matchMedia("(max-width: 899px)");
+SMAL.addEventListener("change", () => { if (location.hash.startsWith("#/menu")) window.dispatchEvent(new Event("tekenen")); });
 
 const fout = (err) => melding(err.message);
 const portieWoord = (r, n) => (r.porties ? (n === 1 ? "portie" : "porties") : "keer");
@@ -210,11 +214,12 @@ export function menu(main, data, sortering) {
   if (sortering) f.sortering = sortering;
   const herteken = (d) => menu(main, d);
   const nu = vandaag();
-  // De komende 7 dagen vanaf vandaag (met ‹ › een week verder kijken). Wat op een dag gepland
+  // De komende dagen vanaf vandaag (met ‹ › verder kijken). Wat op een dag gepland
   // stond die al voorbij is, staat bij "Nog in te plannen".
   if (f.week && f.week <= nu) f.week = null;
   const begin = f.week || nu;
-  const weekDagen = Array.from({ length: 7 }, (_, n) => plusDagen(begin, n));
+  const zichtbaar = SMAL.matches ? 7 : 4;
+  const weekDagen = Array.from({ length: zichtbaar }, (_, n) => plusDagen(begin, n));
   // Kiesbare dagen: twee weken vanaf het begin van wat je ziet.
   const kiesDagen = Array.from({ length: 14 }, (_, n) => plusDagen(begin, n));
 
@@ -238,7 +243,7 @@ export function menu(main, data, sortering) {
   }));
   const toevoegKeuze = (dag, m) => `<select class="dag-toevoegen" data-dag="${dag}" data-moment="${m}" aria-label="${esc(MOMENT_NAAM[m])} toevoegen op ${esc(datumNl(dag))}">
     <option value="">+ toevoegen…</option>${optiesPerMoment[m]}</select>`;
-  const rooster = `<div class="weekrooster">
+  const rooster = `<div class="weekrooster" style="--dagen: ${zichtbaar}">
     <div class="wr-labels" aria-hidden="true"><div></div>${MOMENTEN.map(([, naam]) => `<div class="wr-label">${naam}</div>`).join("")}</div>
     ${weekDagen.map((d) => `<section class="wr-dag${d === nu ? " vandaag" : ""}">
       <h3 class="wr-dagkop">${esc(weekdag(d))} <small>${esc(datumNl(d).replace(/^\S+ /, ""))}${d === nu ? " · vandaag" : ""}</small></h3>
@@ -302,12 +307,12 @@ export function menu(main, data, sortering) {
     </section>` : ""}
 
     <section class="blokje">
-      <div class="kopregel"><h2 class="kop2">${begin === nu ? "De komende 7 dagen" : `${esc(datumNl(begin))} – ${esc(datumNl(weekDagen[6]))}`}</h2>
+      <div class="kopregel"><h2 class="kop2">${begin === nu ? `De komende ${zichtbaar} dagen` : `${esc(datumNl(begin))} – ${esc(datumNl(weekDagen.at(-1)))}`}</h2>
         <span class="weeknav">
-          ${begin > nu ? `<button class="knop klein" data-week="-7" aria-label="Week terug">‹</button>
+          ${begin > nu ? `<button class="knop klein" data-week="-${zichtbaar}" aria-label="Terug">‹</button>
             <button class="knop klein" data-week="0">Vanaf vandaag</button>` : ""}
-          <button class="knop klein" data-week="7" aria-label="Week verder">›</button></span></div>
-      ${voorstel ? voorstelBalk(data, weekDagen[6])
+          <button class="knop klein" data-week="${zichtbaar}" aria-label="Verder">›</button></span></div>
+      ${voorstel ? voorstelBalk(data, weekDagen.at(-1))
         : `<p class="planknop"><button class="knop primair" data-voorstel>Stel een weekplan voor…</button>
           <small class="hint">Vult de lege vakken op basis van wat je in huis hebt, afwisseling en wat je lang niet hebt gegeten.</small></p>`}
       ${inTePlannen.length ? `<div class="wr-los"><h3 class="wr-loskop">Nog in te plannen</h3>
