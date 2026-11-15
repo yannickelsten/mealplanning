@@ -1,17 +1,18 @@
 import { wijzig } from "../store.js";
 import { afgeleideTags } from "../voeding.js";
-import { bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking, dezeWeek, gauwOp,
-  laatstGegeten, overlap } from "../planning.js";
-import { dagenTot, datumNl, esc, geleden, houdbaar, melding, nieuwId, plusDagen, vandaag } from "../util.js";
+import { MOMENTEN, MOMENT_NAAM, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking, dezeWeek,
+  gauwOp, kookVerdeling, laatstGegeten, momentVan, momentenVan, overlap, restenVan } from "../planning.js";
+import { dagenTot, datumNl, esc, geleden, houdbaar, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
 import { gekookt } from "./gekookt.js";
 import { aantalPorties, koppelPorties, portieActie, portiesHtml } from "./porties.js";
+import { huidigVoorstel, koppelVoorstel, planDialoog, voorstelBalk, voorstelTegel } from "./weekplan.js";
 
 // Keuzes blijven bewaard zolang de pagina open is.
 const f = { sortering: "lang", categorie: "alle", vegetarisch: false, aantal: 9, week: null };
 const STAP = 9;
 
 const fout = (err) => melding(err.message);
-const weekdag = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("nl-NL", { weekday: "long" });
+const portieWoord = (r, n) => (r.porties ? (n === 1 ? "portie" : "porties") : "keer");
 
 function receptOpties(data, met = () => true) {
   return data.categorieen.map((c) => {
@@ -23,32 +24,158 @@ function receptOpties(data, met = () => true) {
   }).join("");
 }
 
-// Eén gerecht in de weekplanning.
-function planRij(g, data, dagen) {
+// Korte uitleg onder een gerecht in het rooster: hoeveel, en wat er met de rest gebeurt.
+function tegelMeta(g, data, gerechten) {
   const r = data.recepten[g.recept];
+  const keuze = !g.uit && r.keuzes?.opties?.find((o) => o.id === (g.keuze || r.keuzes.opties[0]?.id))?.naam;
+  const delen = [];
+  let let_op = "";
+  if (g.uit === "voorraad") {
+    const nogBewaard = data.voorraad.porties.some((p) => p.recept === g.recept);
+    delen.push(nogBewaard ? "uit de koelkast/vriezer" : "uit de voorraad, maar er ligt niets meer");
+    if (g.porties !== 1) delen.push(`${g.porties} porties`);
+  } else if (g.van) {
+    const kook = gerechten.find((x) => x.id === g.van);
+    delen.push(kook?.dag ? `rest van ${weekdag(kook.dag)}` : "rest");
+    if (g.porties !== 1) delen.push(`${g.porties} porties`);
+    if (!kook) let_op = "de kookbeurt staat niet meer op het menu";
+    else if (!kook.dag || (g.dag && g.dag <= kook.dag)) let_op = "staat niet ná het koken";
+  } else {
+    const v = kookVerdeling(g, gerechten);
+    delen.push(`${g.porties} ${portieWoord(r, g.porties)} koken`);
+    if (v.resten || v.vriezer) {
+      delen.push(`${v.nu} nu`);
+      if (v.resten) delen.push(`${v.resten} later`);
+      if (v.vriezer) delen.push(`${v.vriezer} naar de vriezer`);
+    }
+  }
+  if (keuze) delen.unshift(keuze);
+  if (g.dag && g.dag < vandaag()) delen.push(`gepland voor ${datumNl(g.dag)}`);
+  return { tekst: delen.join(" · "), let_op };
+}
+
+// Eén gerecht in het weekrooster. Tikken op de naam opent het venster met alle keuzes.
+function tegel(g, data, gerechten) {
+  const r = data.recepten[g.recept];
+  const soort = g.uit === "voorraad" ? "voorraad" : g.van ? "rest" : "kook";
+  const { tekst, let_op } = tegelMeta(g, data, gerechten);
+  const knop = soort === "voorraad" ? "Gegeten" : soort === "kook" ? "Gekookt" : "";
+  return `<div class="wr-gerecht ${soort}" data-id="${esc(g.id)}">
+    <button type="button" class="wr-titel" data-open title="Aanpassen">${esc(r.titel)}</button>
+    <small class="wr-meta">${esc(tekst)}</small>
+    ${let_op ? `<small class="wr-letop">${esc(let_op)}</small>` : ""}
+    ${knop ? `<button type="button" class="knop klein" data-klaar>${knop}</button>` : ""}
+  </div>`;
+}
+
+// Venster bij een gerecht op het menu: dag, moment, keuze, porties, en weghalen.
+function gerechtDialoog(g, data, kiesDagen, herteken) {
+  const r = data.recepten[g.recept];
+  const gerechten = data.menu.gerechten;
   const opties = r.keuzes?.opties || [];
-  const keuze = g.keuze || opties[0]?.id;
   const uitVoorraad = g.uit === "voorraad";
-  const nogBewaard = data.voorraad.porties.some((p) => p.recept === g.recept);
-  const eerder = g.dag && g.dag < vandaag();
-  return `<li data-id="${esc(g.id)}" class="${uitVoorraad ? "uit-voorraad" : ""}">
-    <div class="ml-naam"><a href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>
-      <small>${[uitVoorraad ? (nogBewaard ? "uit de koelkast/vriezer" : "uit de voorraad, maar er ligt niets meer") : r.ondertitel,
-        eerder ? `gepland voor ${datumNl(g.dag)}` : ""].filter(Boolean).map(esc).join(" · ")}</small></div>
-    ${opties.length && !uitVoorraad ? `<select data-keuze aria-label="${esc(r.keuzes.titel || "Keuze")}">${opties.map((o) =>
-      `<option value="${esc(o.id)}" ${o.id === keuze ? "selected" : ""}>${esc(o.naam)}</option>`).join("")}</select>` : ""}
-    <select data-dag aria-label="Dag"><option value="">nog niet ingepland</option>${
-      (g.dag && !dagen.includes(g.dag) ? [g.dag, ...dagen] : dagen).map((d) =>
-      `<option value="${d}" ${d === g.dag ? "selected" : ""}>${esc(datumNl(d))}</option>`).join("")}</select>
-    ${uitVoorraad ? "" : `<div class="ml-porties">
-      <button class="stapper" data-d="-1" aria-label="Minder">−</button>
-      <span class="aantal">${g.porties}</span>
-      <button class="stapper" data-d="1" aria-label="Meer">+</button>
-      <small>${r.porties ? (g.porties === 1 ? "portie" : "porties") : "keer"}</small>
-    </div>`}
-    <button class="knop klein" data-klaar>${uitVoorraad ? "Gegeten" : "Gekookt"}</button>
-    <button class="kruisje" data-weg aria-label="Van het menu halen" title="Van het menu halen">×</button>
-  </li>`;
+  const kook = !uitVoorraad && !g.van;
+  const resten = kook ? restenVan(gerechten, g.id) : [];
+  const v = kook ? kookVerdeling(g, gerechten) : null;
+  const dagen = g.dag && !kiesDagen.includes(g.dag) ? [g.dag, ...kiesDagen] : kiesDagen;
+  const moment = momentVan(g, data);
+  const restTekst = resten.length ? `Rest: ${resten.map((x) => `${x.dag ? weekdag(x.dag) : "nog niet ingepland"} ${MOMENT_NAAM[momentVan(x, data)].toLowerCase()} (${x.porties})`).join(", ")}.` : "";
+
+  const dlg = document.createElement("dialog");
+  dlg.className = "dialoog";
+  dlg.innerHTML = `<form novalidate>
+    <h2 class="dl-kop">${esc(r.titel)}</h2>
+    <p class="dl-titel"><small>${esc(tegelMeta(g, data, gerechten).tekst)}</small> · <a href="#/recept/${esc(r.id)}">naar het recept</a></p>
+    <div class="twee">
+      <label class="veld"><span>Dag</span><select name="dag"><option value="">nog niet ingepland</option>${dagen.map((d) =>
+        `<option value="${d}" ${d === g.dag ? "selected" : ""}>${esc(datumNl(d))}</option>`).join("")}</select></label>
+      <label class="veld"><span>Moment</span><select name="moment">${MOMENTEN.map(([m, naam]) =>
+        `<option value="${m}" ${m === moment ? "selected" : ""}>${naam}</option>`).join("")}</select></label>
+    </div>
+    ${opties.length && !uitVoorraad ? `<label class="veld"><span>${esc(r.keuzes.titel || "Keuze")}</span><select name="keuze">${opties.map((o) =>
+      `<option value="${esc(o.id)}" ${o.id === (g.keuze || opties[0].id) ? "selected" : ""}>${esc(o.naam)}</option>`).join("")}</select></label>` : ""}
+    ${kook ? `<div class="twee">
+        <label class="veld"><span>${r.porties ? "Porties koken" : "Keer maken"}</span><input type="number" name="porties" min="1" step="1" value="${g.porties}"></label>
+        ${r.porties ? `<label class="veld"><span>Daarvan nu eten</span><input type="number" name="eten" min="0" step="1" value="${v.nu}"></label>` : ""}
+      </div>
+      <p class="hint dl-plan"></p>`
+      : `<label class="veld"><span>Porties</span><input type="number" name="porties" min="1" step="1" value="${g.porties}"></label>`}
+    ${g.van ? `<p class="hint">Dit is de rest van een kookbeurt; je kookt het dus niet opnieuw.</p>` : ""}
+    <div class="knoppen">
+      <button class="knop primair" type="submit">Opslaan</button>
+      ${kook || uitVoorraad ? `<button class="knop" type="button" data-klaar>${uitVoorraad ? "Gegeten" : "Gekookt…"}</button>` : ""}
+      <button class="knop" type="button" data-annuleer>Annuleren</button>
+      <button class="knop gevaar" type="button" data-weg>Van het menu halen</button>
+    </div>
+  </form>`;
+  document.body.append(dlg);
+  const form = dlg.querySelector("form");
+  const getal = (naam, min) => Math.max(min, Math.round(Number(form[naam]?.value) || 0));
+  const planEl = dlg.querySelector(".dl-plan");
+  const toonPlan = () => {
+    if (!planEl) return;
+    const n = getal("porties", 1);
+    const nu = Math.min(form.eten ? getal("eten", 0) : n, n);
+    const later = Math.min(v.resten, n - nu);
+    const vriezer = n - nu - later;
+    planEl.textContent = [restTekst, vriezer ? `${vriezer} ${vriezer === 1 ? "portie" : "porties"} naar de vriezer.` : "",
+      later < v.resten ? "Te weinig porties voor alle resten die gepland staan." : ""].filter(Boolean).join(" ");
+  };
+  toonPlan();
+  form.addEventListener("input", toonPlan);
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.querySelector("[data-annuleer]").addEventListener("click", () => dlg.close());
+  const pas = (fn) => wijzig("menu", (doc) => {
+    const x = doc.gerechten.find((y) => y.id === g.id);
+    if (x) fn(x, doc);
+  }).then((d) => { dlg.close(); herteken(d); }, fout);
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const dag = form.dag.value || null;
+    const porties = getal("porties", 1);
+    const eten = form.eten ? Math.min(getal("eten", 0), porties) : null;
+    pas((x, doc) => {
+      const eigenResten = kook ? restenVan(doc.gerechten, x.id) : [];
+      // Schuift de kookbeurt een paar dagen op, dan schuiven de resten mee.
+      if (x.dag && dag && dag !== x.dag) {
+        const verschil = dagenTot(dag) - dagenTot(x.dag);
+        for (const y of eigenResten) if (y.dag) y.dag = plusDagen(y.dag, verschil);
+      }
+      if (dag) x.dag = dag; else delete x.dag;
+      x.moment = form.moment.value;
+      if (form.keuze) {
+        x.keuze = form.keuze.value;
+        for (const y of eigenResten) y.keuze = x.keuze;
+      }
+      x.porties = porties;
+      // 'eten' alleen bewaren als er iets naar de vriezer gaat; anders volgt het uit de resten.
+      const restSom = eigenResten.reduce((s, y) => s + y.porties, 0);
+      if (eten != null && eten + restSom < porties) x.eten = eten; else delete x.eten;
+    });
+  });
+  dlg.querySelector("[data-weg]").addEventListener("click", () => pas((x, doc) => {
+    // Een kookbeurt weghalen haalt ook de resten ervan weg.
+    doc.gerechten = doc.gerechten.filter((y) => y.id !== g.id && !(kook && y.van === g.id));
+  }));
+  dlg.querySelector("[data-klaar]")?.addEventListener("click", () => { dlg.close(); klaarMet(g, data, herteken); });
+  dlg.showModal();
+}
+
+// "Gekookt" (een kookbeurt) of "Gegeten" (een portie uit de koelkast/vriezer).
+function klaarMet(g, data, herteken) {
+  const r = data.recepten[g.recept];
+  if (g.uit !== "voorraad") {
+    return gekookt({ data, recept: r, porties: g.porties, keuze: g.keuze || r.keuzes?.opties?.[0]?.id, menuId: g.id, klaar: herteken });
+  }
+  // Uit de voorraad: de portie die het eerst op moet.
+  const p = bewaardePorties(data).find((x) => x.recept === g.recept);
+  const vanMenu = () => wijzig("menu", (doc) => { doc.gerechten = doc.gerechten.filter((y) => y.id !== g.id); }).then(herteken, fout);
+  if (!p) {
+    if (confirm(`Er ligt geen ${r.titel} meer in de koelkast of vriezer. Van het menu halen?`)) vanMenu();
+    return;
+  }
+  portieActie(data, p, "eten", vanMenu);
 }
 
 function suggestieKaart(i, opMenu, metVoorraad) {
@@ -91,18 +218,42 @@ export function menu(main, data, sortering) {
   // Kiesbare dagen: twee weken vanaf het begin van wat je ziet.
   const kiesDagen = Array.from({ length: 14 }, (_, n) => plusDagen(begin, n));
 
-  // Weekplanning
+  // Weekrooster
   const gerechten = data.menu.gerechten.filter((g) => data.recepten[g.recept]);
   const opMenu = new Set(gerechten.map((g) => g.recept));
   const inTePlannen = gerechten.filter((g) => !g.dag || g.dag < nu);
   const lijst = boodschappenlijst(data);
   const teKopen = lijst.filter((x) => x.status === "kopen" && !x.later).length + data.boodschappen.extra.length;
-  const bewaardeRecepten = new Set(data.voorraad.porties.map((p) => p.recept));
-  const toevoegKeuze = (dag) => `<select class="dag-toevoegen" data-dag="${dag}" aria-label="Gerecht toevoegen">
-    <option value="">+ toevoegen…</option>
-    ${bewaardeRecepten.size ? `<optgroup label="Uit de koelkast/vriezer">${[...bewaardeRecepten].filter((id) => data.recepten[id])
+  const bewaardeRecepten = [...new Set(data.voorraad.porties.map((p) => p.recept))].filter((id) => data.recepten[id]);
+  const voorstel = huidigVoorstel();
+  // Keuzelijst per vak: eerst wat bewaard is, dan wat bij dit moment past, dan de rest.
+  const optie = (r) => `<option value="r:${esc(r.id)}">${esc(r.titel)}${r.variant_van && r.ondertitel ? ` (${esc(r.ondertitel)})` : ""}</option>`;
+  const optiesPerMoment = Object.fromEntries(MOMENTEN.map(([m, naam]) => {
+    const past = Object.values(data.recepten).filter((r) => momentenVan(r, data).includes(m))
+      .sort((a, b) => a.titel.localeCompare(b.titel, "nl") || (a.variant_van ? 1 : -1));
+    return [m, `${bewaardeRecepten.length ? `<optgroup label="Uit de koelkast/vriezer">${bewaardeRecepten
       .map((id) => `<option value="v:${esc(id)}">${esc(data.recepten[id].titel)}</option>`).join("")}</optgroup>` : ""}
-    ${receptOpties(data)}</select>`;
+      ${past.length ? `<optgroup label="Past bij ${esc(naam.toLowerCase())}">${past.map(optie).join("")}</optgroup>` : ""}
+      ${receptOpties(data, (r) => !momentenVan(r, data).includes(m))}`];
+  }));
+  const toevoegKeuze = (dag, m) => `<select class="dag-toevoegen" data-dag="${dag}" data-moment="${m}" aria-label="${esc(MOMENT_NAAM[m])} toevoegen op ${esc(datumNl(dag))}">
+    <option value="">+ toevoegen…</option>${optiesPerMoment[m]}</select>`;
+  const rooster = `<div class="weekrooster">
+    <div class="wr-labels" aria-hidden="true"><div></div>${MOMENTEN.map(([, naam]) => `<div class="wr-label">${naam}</div>`).join("")}</div>
+    ${weekDagen.map((d) => `<section class="wr-dag${d === nu ? " vandaag" : ""}">
+      <h3 class="wr-dagkop">${esc(weekdag(d))} <small>${esc(datumNl(d).replace(/^\S+ /, ""))}${d === nu ? " · vandaag" : ""}</small></h3>
+      ${MOMENTEN.map(([m, naam]) => {
+        const hier = gerechten.filter((g) => g.dag === d && momentVan(g, data) === m);
+        const vs = voorstel ? voorstel.items.filter((i) => i.dag === d && i.moment === m) : [];
+        return `<div class="wr-cel${hier.length || vs.length ? "" : " leeg"}">
+          <span class="wr-celkop">${naam}</span>
+          ${hier.map((g) => tegel(g, data, gerechten)).join("")}
+          ${vs.map((i) => voorstelTegel(i, data)).join("")}
+          ${toevoegKeuze(d, m)}
+        </div>`;
+      }).join("")}
+    </section>`).join("")}
+  </div>`;
 
   // Suggesties
   const onderdeel = new Set(data.categorieen.filter((c) => c.onderdeel).map((c) => c.id));
@@ -156,17 +307,13 @@ export function menu(main, data, sortering) {
           ${begin > nu ? `<button class="knop klein" data-week="-7" aria-label="Week terug">‹</button>
             <button class="knop klein" data-week="0">Vanaf vandaag</button>` : ""}
           <button class="knop klein" data-week="7" aria-label="Week verder">›</button></span></div>
-      ${inTePlannen.length ? `<div class="dagvak ongepland"><h3 class="dagkop">Nog in te plannen</h3>
-        <ul class="menulijst">${inTePlannen.map((g) => planRij(g, data, kiesDagen)).join("")}</ul></div>` : ""}
-      ${weekDagen.map((d) => {
-        const hier = gerechten.filter((g) => g.dag === d);
-        return `<div class="dagvak${d === nu ? " vandaag" : ""}">
-          <h3 class="dagkop">${esc(weekdag(d))} <small>${esc(datumNl(d).replace(/^\S+ /, ""))}${d === nu ? " · vandaag" : ""}</small></h3>
-          ${hier.length ? `<ul class="menulijst">${hier.map((g) => planRij(g, data, kiesDagen)).join("")}</ul>` : ""}
-          ${toevoegKeuze(d)}
-        </div>`;
-      }).join("")}
-      <p><a class="knop" href="#/boodschappen">Boodschappenlijst${teKopen ? ` (${teKopen})` : ""} →</a>
+      ${voorstel ? voorstelBalk(data, weekDagen[6])
+        : `<p class="planknop"><button class="knop primair" data-voorstel>Stel een weekplan voor…</button>
+          <small class="hint">Vult de lege vakken op basis van wat je in huis hebt, afwisseling en wat je lang niet hebt gegeten.</small></p>`}
+      ${inTePlannen.length ? `<div class="wr-los"><h3 class="wr-loskop">Nog in te plannen</h3>
+        <div class="wr-lostegels">${inTePlannen.map((g) => tegel(g, data, gerechten)).join("")}</div></div>` : ""}
+      ${rooster}
+      <p class="na-rooster"><a class="knop" href="#/boodschappen">Boodschappenlijst${teKopen ? ` (${teKopen})` : ""} →</a>
         <a class="knop" href="#/logboek">Logboek →</a></p>
     </section>
 
@@ -198,7 +345,7 @@ export function menu(main, data, sortering) {
 
   koppelPorties(main, data, herteken);
 
-  // Weekplanning
+  // Weekrooster
   main.querySelectorAll("[data-week]").forEach((b) => b.addEventListener("click", () => {
     const d = Number(b.dataset.week);
     f.week = d ? plusDagen(begin, d) : null;
@@ -209,43 +356,21 @@ export function menu(main, data, sortering) {
     if (!id) return;
     const r = data.recepten[id];
     wijzig("menu", (doc) => {
-      doc.gerechten.push({ id: nieuwId(), recept: id, porties: soort === "v" ? 1 : r.porties || 1, dag: sel.dataset.dag,
-        ...(soort === "v" ? { uit: "voorraad" } : {}) });
+      doc.gerechten.push({ id: nieuwId(), recept: id, porties: soort === "v" ? 1 : r.porties || 1,
+        dag: sel.dataset.dag, moment: sel.dataset.moment, ...(soort === "v" ? { uit: "voorraad" } : {}) });
     }).then(herteken, fout);
   }));
-  main.querySelectorAll(".menulijst li").forEach((li) => {
-    const id = li.dataset.id;
-    const g = gerechten.find((x) => x.id === id);
-    const pas = (fn) => wijzig("menu", (doc) => {
-      const x = doc.gerechten.find((y) => y.id === id);
-      if (x) fn(x, doc);
-    }).then(herteken, fout);
-    li.querySelectorAll(".stapper").forEach((b) => b.addEventListener("click", () => {
-      const nieuw = Math.max(1, g.porties + Number(b.dataset.d));
-      pas((x) => { x.porties = nieuw; });
-    }));
-    li.querySelector("[data-keuze]")?.addEventListener("change", (e) => pas((x) => { x.keuze = e.target.value; }));
-    li.querySelector("[data-dag]").addEventListener("change", (e) => pas((x) => {
-      if (e.target.value) x.dag = e.target.value; else delete x.dag;
-    }));
-    li.querySelector("[data-weg]").addEventListener("click", () => pas((x, doc) => {
-      doc.gerechten = doc.gerechten.filter((y) => y.id !== id);
-    }));
-    li.querySelector("[data-klaar]").addEventListener("click", () => {
-      const r = data.recepten[g.recept];
-      if (g.uit !== "voorraad") {
-        return gekookt({ data, recept: r, porties: g.porties, keuze: g.keuze || r.keuzes?.opties?.[0]?.id, menuId: g.id, klaar: herteken });
-      }
-      // Uit de voorraad: de portie die het eerst op moet.
-      const p = bewaardePorties(data).find((x) => x.recept === g.recept);
-      const vanMenu = () => wijzig("menu", (doc) => { doc.gerechten = doc.gerechten.filter((y) => y.id !== id); }).then(herteken, fout);
-      if (!p) {
-        if (confirm(`Er ligt geen ${r.titel} meer in de koelkast of vriezer. Van het menu halen?`)) vanMenu();
-        return;
-      }
-      portieActie(data, p, "eten", vanMenu);
-    });
+  main.querySelectorAll(".wr-gerecht[data-id]").forEach((el) => {
+    const g = gerechten.find((x) => x.id === el.dataset.id);
+    if (!g) return;
+    el.querySelector("[data-open]").addEventListener("click", () => gerechtDialoog(g, data, kiesDagen, herteken));
+    el.querySelector("[data-klaar]")?.addEventListener("click", () => klaarMet(g, data, herteken));
   });
+  main.querySelector("[data-voorstel]")?.addEventListener("click", () => planDialoog(data, (opties) => {
+    f.week = opties.begin > nu ? opties.begin : null;
+    herteken(data);
+  }));
+  koppelVoorstel(main, data, herteken);
 
   // Suggesties
   main.querySelector(".filters").addEventListener("click", (e) => {

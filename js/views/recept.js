@@ -1,7 +1,7 @@
 import { wijzig } from "../store.js";
 import { afgeleideTags, rekenIng, voeding } from "../voeding.js";
 import { dagenTot, datumNl, esc, euro, geleden, hoeveelheid, melding, nieuwId, nl } from "../util.js";
-import { zelfGegeten } from "../planning.js";
+import { kookbeurtOpMenu, zelfGegeten } from "../planning.js";
 import { gekookt } from "./gekookt.js";
 
 // Gekozen porties en keuze per recept, zolang de pagina open is (ook gebruikt door de kookstand).
@@ -57,7 +57,8 @@ export function recept(main, data, id) {
     .filter((x) => x.variant_van === basisId)].filter(Boolean);
   const optie = opties.find((o) => o.id === s.keuze);
   const cat = data.categorieen.find((c) => c.id === r.categorie);
-  const opMenu = data.menu.gerechten.find((g) => g.recept === id);
+  const opMenu = data.menu.gerechten.some((g) => g.recept === id);
+  const kookbeurt = kookbeurtOpMenu(data, id); // die wordt bij "Gekookt…" van het menu gehaald
   const keerGegeten = data.logboek.maaltijden.filter((m) => m.recept === id && zelfGegeten(m));
   const laatst = keerGegeten.map((m) => m.datum).sort().at(-1);
   const bewaard = data.voorraad.porties.filter((p) => p.recept === id);
@@ -148,7 +149,7 @@ export function recept(main, data, id) {
     });
   });
   main.querySelector("[data-gekookt]").addEventListener("click", () => gekookt({
-    data, recept: r, porties: s.porties, keuze: s.keuze, menuId: opMenu?.id,
+    data, recept: r, porties: s.porties, keuze: s.keuze, menuId: kookbeurt?.id,
     klaar: (d) => recept(main, d, id),
   }));
 

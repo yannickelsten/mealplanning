@@ -89,6 +89,9 @@ export function datumNl(iso) {
   return new Date(j, m - 1, d).toLocaleDateString("nl-NL", opties);
 }
 
+// "maandag"
+export const weekdag = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("nl-NL", { weekday: "long" });
+
 // "vandaag", "gisteren", "5 dagen geleden", "3 weken geleden", "2 maanden geleden"
 export function geleden(iso) {
   const n = -dagenTot(iso);

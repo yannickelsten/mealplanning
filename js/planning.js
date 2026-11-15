@@ -6,7 +6,7 @@
 // Zonder hoeveelheid betekent "in huis, genoeg" (zout, kruiden…).
 
 import { afgeleideTags, gram, regels, rekenIng, voeding } from "./voeding.js";
-import { breuk, dagenTot, hoeveelheid, nieuwId, nl, plusDagen, vandaag } from "./util.js";
+import { breuk, dagenTot, geleden, hoeveelheid, houdbaar, nieuwId, nl, plusDagen, vandaag } from "./util.js";
 
 export const PLEKKEN = [["koelkast", "Koelkast"], ["vriezer", "Vriezer"], ["kast", "Voorraadkast"]];
 const GAUW = 3; // dagen: "gauw opmaken"
@@ -250,8 +250,50 @@ export function inVerpakkingen(lijst, ing, eenheden) {
   return { hoeveelheid: Math.max(1, Math.ceil(g / v[1] - 0.02)), eenheid: v[0] };
 }
 
-// Gerechten op het menu die gekookt moeten worden (niet: "uit de voorraad" opeten).
-export const teKoken = (data) => data.menu.gerechten.filter((g) => g.uit !== "voorraad" && data.recepten[g.recept]);
+// Gerechten op het menu die gekookt moeten worden (niet: "uit de voorraad" opeten, en niet de
+// rest van een kookbeurt die al op het menu staat).
+export const teKoken = (data) => data.menu.gerechten.filter((g) => g.uit !== "voorraad" && !g.van && data.recepten[g.recept]);
+
+// ---- Maaltijdmomenten ----
+export const MOMENTEN = [["ontbijt", "Ontbijt"], ["lunch", "Lunch"], ["diner", "Avondeten"], ["snack", "Tussendoor"]];
+export const MOMENT_NAAM = Object.fromEntries(MOMENTEN);
+const MOMENT_RANG = Object.fromEntries(MOMENTEN.map(([m], i) => [m, i]));
+
+// Bij welke momenten een recept past: van het recept zelf, anders van het basisrecept (bij een
+// variant), anders van de categorie (categorieen.json). Onderdelen (sauzen…) passen nergens.
+export function momentenVan(r, data) {
+  if (!r) return [];
+  if (r.momenten?.length) return r.momenten;
+  const basis = r.variant_van && data.recepten[r.variant_van];
+  if (basis?.momenten?.length) return basis.momenten;
+  return standaardMomenten(r.categorie, data);
+}
+export const standaardMomenten = (categorie, data) => data.categorieen.find((c) => c.id === categorie)?.momenten || [];
+
+// Het moment van een gerecht op het menu. Zonder moment (van voor het weekrooster):
+// avondeten, of het eerste moment waar het recept bij past (overnight oats → ontbijt).
+export function momentVan(g, data) {
+  if (g.moment) return g.moment;
+  const m = momentenVan(data.recepten[g.recept], data);
+  return !m.length || m.includes("diner") ? "diner" : m[0];
+}
+
+// De rest van een kookbeurt op het menu (gerechten met van = die id).
+export const restenVan = (gerechten, id) => gerechten.filter((g) => g.van === id);
+const som = (lijst) => lijst.reduce((s, g) => s + g.porties, 0);
+
+// Wat er van een kookbeurt op het menu gebeurt: {nu, resten (porties), vriezer}. Zonder
+// `eten` eet je alles wat niet als rest gepland staat meteen op (zoals vóór het weekrooster).
+export function kookVerdeling(g, gerechten) {
+  const resten = som(restenVan(gerechten, g.id));
+  const nu = Math.max(0, Math.min(g.eten ?? g.porties - resten, g.porties - resten));
+  return { nu, resten, vriezer: Math.max(0, g.porties - nu - resten) };
+}
+
+// De kookbeurt van een recept op het menu (niet: een rest of een portie uit de voorraad), de vroegste eerst.
+export const kookbeurtOpMenu = (data, id) => data.menu.gerechten
+  .filter((g) => g.recept === id && !g.van && g.uit !== "voorraad")
+  .sort((a, b) => (a.dag || "9").localeCompare(b.dag || "9"))[0];
 
 // ---- Wat "in huis" is zonder hoeveelheid (olie, sauzen, kruiden) raakt ook op ----
 // Geschat uit het logboek: alles wat sinds het kopen gekookt is, in gram. Niets hiervan wordt
@@ -666,7 +708,7 @@ export function dezeWeek(data) {
     for (const k of kenmerken(data.recepten[r.variant_van] || r, data)) telling.set(k, (telling.get(k) || 0) + 1);
   };
   for (const m of data.logboek.maaltijden) if (zelfGegeten(m) && dagenTot(m.datum) >= -6) tel(m.recept);
-  for (const g of data.menu.gerechten) tel(g.recept);
+  for (const g of data.menu.gerechten) if (!g.van) tel(g.recept); // een rest is hetzelfde gerecht
   return telling;
 }
 
@@ -706,4 +748,162 @@ export function dagwaarde(tekst) {
   let h = 2166136261;
   for (const c of tekst + vandaag()) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
   return h >>> 0;
+}
+
+// ---- Weekplan voorstellen ----
+// Hoe lang een rest uit de koelkast nog op het menu mag (dagen na het koken).
+const REST_DAGEN = BEWAARDAGEN.koelkast;
+const dagenTussen = (a, b) => dagenTot(b) - dagenTot(a);
+const vakSleutel = (dag, moment) => `${dag}|${moment}`;
+const basisId = (data, id) => data.recepten[id]?.variant_van || id;
+
+// Een kookbeurt in een kopie van de gegevens "uitvoeren": ingrediënten en gebruikte
+// onderdelen gaan uit de voorraad van de kopie, zodat het volgende gerecht ziet wat er over is.
+function kookInKopie(kopie, g) {
+  const onderdelen = bewaardeOnderdelen(kopie);
+  for (const x of benodigd([g], kopie, onderdelen).values()) {
+    if (!x.nodig.length) continue;
+    const vanSoort = (p) => soortVan(kopie, p.ingredient) === x.slug;
+    const partijen = kopie.voorraad.ingredienten.filter(vanSoort);
+    if (!partijen.some((p) => p.hoeveelheid != null)) continue;
+    const af = afboeken(partijen, x.nodig, kopie);
+    if (af.gelukt) kopie.voorraad.ingredienten = [...kopie.voorraad.ingredienten.filter((p) => !vanSoort(p)), ...af.partijen];
+  }
+  onderdelenAfnemen(kopie.voorraad.porties, onderdelen.gebruikt, kopie);
+}
+
+// Waarom dit gerecht: korte zinnen voor op het voorstel.
+function redenenVoor(r, laatst, dek, metVoorraad, dag) {
+  const uit = [laatst ? `Laatst gegeten ${geleden(laatst.datum)}` : "Nog niet gegeten"];
+  const gauw = dek.gauw.filter((x) => dag <= x.datum);
+  if (gauw.length) uit.push(`Gebruikt ${gauw.map((x) => `${x.naam.toLowerCase()} (${x.open ? "open, " : ""}${houdbaar(x.datum)})`).join(", ")}`);
+  if (metVoorraad && dek.totaal) {
+    const n = dek.ontbreekt.length;
+    uit.push(!n ? "Alles in huis" : n <= 3 ? `Nog kopen: ${dek.ontbreekt.join(", ").toLowerCase()}` : `Nog ${n} van ${dek.totaal} ingrediënten kopen`);
+  }
+  return uit;
+}
+
+// Stelt een menu voor de komende dagen voor. Niets wordt opgeslagen.
+// opties: {begin, dagen, eters, momenten: welke vakken invullen, uitgesloten: Set recepten,
+//   vast: voorstellen die blijven staan (uit een vorige ronde; met aan: false = afgewezen,
+//   dat vak blijft dan leeg), ronde: 0, 1, 2… ("Opnieuw voorstellen" geeft een ander plan)}.
+// Geeft [{tid, recept, porties, dag, moment, keuze?, eten?, van?, uit?, redenen}]:
+//   een kookbeurt (eten = porties bij die maaltijd), een rest daarvan (van = tid van de
+//   kookbeurt) of een bewaarde portie uit de koelkast (uit: "voorraad").
+// Werkwijze: eerst wat al gekookt in de koelkast ligt; dan per vak, in volgorde van de tijd,
+// het gerecht met de beste score (lang niet gegeten, afwisseling, wat gauw op moet, wat in
+// huis is); de porties die overblijven gaan naar volgende lunches/avondeten binnen 3 dagen.
+export function stelPlanVoor(data, opties = {}) {
+  const { begin = vandaag(), dagen = 7, eters = 1, momenten = ["lunch", "diner"], vast = [], ronde = 0 } = opties;
+  const uitgesloten = new Set(opties.uitgesloten || []);
+  const dagLijst = Array.from({ length: dagen }, (_, n) => plusDagen(begin, n));
+  const volgorde = MOMENTEN.map(([m]) => m).filter((m) => momenten.includes(m));
+  const vakken = dagLijst.flatMap((dag) => volgorde.map((moment) => ({ dag, moment })));
+
+  // Werken op een kopie: het menu krijgt de voorstellen erbij, de voorraad raakt op.
+  const kopie = { ...data,
+    menu: { gerechten: data.menu.gerechten.filter((g) => data.recepten[g.recept]) },
+    voorraad: { ingredienten: data.voorraad.ingredienten.map((p) => ({ ...p })),
+      porties: data.voorraad.porties.map((p) => ({ ...p })) } };
+  const bezet = new Set();
+  const gebruikt = new Set(); // basisrecepten die al op het menu of in dit plan staan
+  const opDag = new Set(); // "dag|basisrecept": niet twee keer hetzelfde op één dag
+  const neem = (g) => {
+    if (g.dag) bezet.add(vakSleutel(g.dag, momentVan(g, data)));
+    gebruikt.add(basisId(data, g.recept));
+    if (g.dag) opDag.add(`${g.dag}|${basisId(data, g.recept)}`);
+  };
+  for (const g of kopie.menu.gerechten) neem(g);
+  // Wat al gepland is, gaat al van de voorraad af.
+  for (const g of teKoken(kopie)) kookInKopie(kopie, g);
+  const uitVoorraadGepland = new Map();
+  for (const g of kopie.menu.gerechten) {
+    if (g.uit === "voorraad") uitVoorraadGepland.set(g.recept, (uitVoorraadGepland.get(g.recept) || 0) + g.porties);
+  }
+
+  const uit = [];
+  let teller = 0;
+  const tid = () => `${opties.sleutel || `v${ronde}`}-${++teller}`; // sleutel: uniek per aanroep
+  // Vorige ronde: blijft staan. Afgewezen vakken blijven leeg, dat recept komt niet terug.
+  for (const v of vast) {
+    bezet.add(vakSleutel(v.dag, v.moment));
+    if (v.aan === false) { if (!v.van && !v.uit) uitgesloten.add(v.recept); }
+    else {
+      neem(v);
+      if (!v.van && !v.uit) kookInKopie(kopie, v);
+      if (v.uit === "voorraad") uitVoorraadGepland.set(v.recept, (uitVoorraadGepland.get(v.recept) || 0) + v.porties);
+      kopie.menu.gerechten.push({ ...v, id: v.tid });
+    }
+    uit.push(v);
+  }
+  const vrij = (dag, moment) => !bezet.has(vakSleutel(dag, moment));
+
+  // 1. Wat al gekookt in de koelkast ligt eerst opeten (de vriezer blijft staan).
+  const inKoelkast = new Map();
+  for (const p of bewaardePorties(kopie)) {
+    if (p.plek !== "koelkast" || !momentenVan(data.recepten[p.recept], data).length) continue;
+    inKoelkast.set(p.recept, (inKoelkast.get(p.recept) || 0) + p.aantal);
+  }
+  for (const [recept, aantal] of inKoelkast) {
+    let rest = aantal - (uitVoorraadGepland.get(recept) || 0);
+    const past = momentenVan(data.recepten[recept], data);
+    for (const vak of vakken) {
+      if (rest < 0.5) break;
+      if (!past.includes(vak.moment) || !vrij(vak.dag, vak.moment) || opDag.has(`${vak.dag}|${basisId(data, recept)}`)) continue;
+      const n = Math.min(eters, Math.round(rest));
+      const g = { tid: tid(), recept, porties: n, dag: vak.dag, moment: vak.moment, uit: "voorraad", redenen: ["Ligt al klaar in de koelkast"] };
+      neem(g);
+      kopie.menu.gerechten.push({ ...g, id: g.tid });
+      uit.push(g);
+      rest -= n;
+    }
+  }
+
+  // 2. Per vak het beste gerecht kiezen, en de rest ervan verdelen.
+  const onderdeel = new Set(data.categorieen.filter((c) => c.onderdeel).map((c) => c.id));
+  const kandidaten = Object.values(data.recepten).filter((r) => !r.variant_van && !onderdeel.has(r.categorie) && r.porties);
+  const laatst = laatstGegeten(data);
+  const metVoorraad = data.voorraad.ingredienten.length > 0;
+  const ruis = ronde ? 15 : 3; // bij "opnieuw voorstellen" mag het meer verschillen
+  for (const vak of vakken) {
+    if (!vrij(vak.dag, vak.moment)) continue;
+    const week = dezeWeek(kopie);
+    let beste = null;
+    for (const r of kandidaten) {
+      if (gebruikt.has(r.id) || uitgesloten.has(r.id) || !momentenVan(r, data).includes(vak.moment)) continue;
+      const l = laatst[r.id];
+      const dek = dekking(r, kopie);
+      let score = Math.min(l ? -dagenTot(l.datum) : 60, 60) - 8 * overlap(r, kopie, week).score;
+      score += 12 * dek.gauw.filter((x) => vak.dag <= x.datum).length;
+      if (metVoorraad && dek.totaal) score += dek.ontbreekt.length ? -2 * dek.ontbreekt.length : 6;
+      score += (dagwaarde(`${r.id}|${ronde}|${vak.dag}|${vak.moment}`) % 1000) / 1000 * ruis;
+      if (!beste || score > beste.score) beste = { r, score, l, dek };
+    }
+    if (!beste) continue;
+    const { r } = beste;
+    const porties = r.porties * Math.max(1, Math.ceil(eters / r.porties));
+    const keuze = r.keuzes?.opties?.[0]?.id;
+    const kook = { tid: tid(), recept: r.id, porties, eten: Math.min(eters, porties), dag: vak.dag, moment: vak.moment,
+      ...(keuze ? { keuze } : {}), redenen: redenenVoor(r, beste.l, beste.dek, metVoorraad, vak.dag) };
+    neem(kook);
+    kopie.menu.gerechten.push({ ...kook, id: kook.tid });
+    kookInKopie(kopie, kook);
+    uit.push(kook);
+    // De rest: volgende vakken waar het gerecht bij past, binnen een paar dagen, niet twee keer op een dag.
+    let rest = porties - kook.eten;
+    const past = momentenVan(r, data);
+    for (const v of vakken) {
+      if (rest <= 0) break;
+      const na = dagenTussen(vak.dag, v.dag);
+      if (na < 1 || na > REST_DAGEN || !past.includes(v.moment) || !vrij(v.dag, v.moment) || opDag.has(`${v.dag}|${r.id}`)) continue;
+      const n = Math.min(eters, rest);
+      const g = { tid: tid(), recept: r.id, porties: n, dag: v.dag, moment: v.moment, van: kook.tid, ...(keuze ? { keuze } : {}), redenen: [] };
+      neem(g);
+      kopie.menu.gerechten.push({ ...g, id: g.tid });
+      uit.push(g);
+      rest -= n;
+    }
+  }
+  return uit.sort((a, b) => a.dag.localeCompare(b.dag) || MOMENT_RANG[a.moment] - MOMENT_RANG[b.moment]);
 }

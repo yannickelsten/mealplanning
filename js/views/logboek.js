@@ -1,7 +1,7 @@
 // Logboek: wat je at (voeding per dag t.o.v. je doel), wat je kookte, en per ingrediënt wat je
 // gebruikte, opmaakte en weggooide.
 import { wijzig } from "../store.js";
-import { benodigd, rond, toonHoeveelheid, voedingPerDag } from "../planning.js";
+import { benodigd, kookbeurtOpMenu, rond, toonHoeveelheid, voedingPerDag } from "../planning.js";
 import { datumNl, esc, melding, nl, plusDagen, vandaag } from "../util.js";
 import { gekookt } from "./gekookt.js";
 
@@ -182,7 +182,7 @@ export function logboek(main, data) {
   main.querySelector("#log-knop").addEventListener("click", () => {
     const r = data.recepten[main.querySelector("#log-recept").value];
     if (!r) return melding("Kies eerst een recept");
-    const g = data.menu.gerechten.find((x) => x.recept === r.id && x.uit !== "voorraad");
+    const g = kookbeurtOpMenu(data, r.id);
     gekookt({ data, recept: r, porties: g?.porties || r.porties || 1, keuze: g?.keuze || r.keuzes?.opties?.[0]?.id,
       menuId: g?.id, klaar: herteken });
   });

@@ -2,6 +2,7 @@
 // bestanden die Claude schrijft.
 import { bewaarRecept, laad, verwijderRecept } from "../store.js";
 import { voeding } from "../voeding.js";
+import { MOMENTEN, momentenVan } from "../planning.js";
 import { esc, melding, nl, slugVan, vandaag } from "../util.js";
 
 const RECEPT_EENHEDEN = ["keer", "portie", "g", "kg", "ml", "l"];
@@ -70,6 +71,11 @@ export function bewerken(main, data, id) {
           ${["keuken", "vibe"].map((soort) => `<label class="veld"><span>${soort === "keuken" ? "Keuken" : "Vibe"}</span>
             <input name="${soort}" value="${esc((r.tags?.[soort] || []).join(", "))}" placeholder="met komma's">
             <span class="tagkeuze" data-voor="${soort}">${alleTags(soort).map((t) => `<button type="button" class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}</span></label>`).join("")}
+          <fieldset class="keuzerij momentkeuze"><legend>Past bij</legend>
+            ${MOMENTEN.map(([m, naam]) => `<label class="vink"><input type="checkbox" name="moment" value="${m}"
+              ${momentenVan({ ...r, categorie }, data).includes(m) ? "checked" : ""}> ${naam}</label>`).join("")}
+            <small class="hint">Voor het weekmenu. Niets aangepast = wat bij de categorie hoort${origineel?.variant_van ? " (of bij het basisrecept)" : ""}.</small>
+          </fieldset>
         </fieldset>
 
         <fieldset><legend>Ingrediënten en bereiding</legend>
@@ -162,6 +168,11 @@ export function bewerken(main, data, id) {
     r.tags = { ...(r.tags || {}),
       keuken: form.keuken.value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
       vibe: form.vibe.value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean) };
+    // Alleen opslaan als het afwijkt van wat het recept anders zou krijgen (categorie/basisrecept).
+    const momenten = [...form.querySelectorAll("[name=moment]:checked")].map((i) => i.value);
+    const anders = momentenVan({ ...r, momenten: null, categorie }, data);
+    if (!momenten.length || momenten.join() === anders.join()) delete r.momenten;
+    else r.momenten = momenten;
     r.stappen = [...form.querySelectorAll(".stap:not(.optie)")].map((st, i) => ({
       ingredienten: leesRegels(st, `Stap ${i + 1}`),
       instructie: st.querySelector(".s-instructie").value.trim(),

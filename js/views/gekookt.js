@@ -1,5 +1,5 @@
 import { wijzig } from "../store.js";
-import { afboeken, onderdelenAfnemen, soortVan, toonPartijen, verbruik } from "../planning.js";
+import { afboeken, kookVerdeling, onderdelenAfnemen, restenVan, soortVan, toonPartijen, verbruik } from "../planning.js";
 import { breuk, esc, melding, nieuwId, vandaag } from "../util.js";
 
 // Wat er met de porties kan gebeuren. Basisrecepten (porties null: hoemoes, crispy tofu…)
@@ -10,8 +10,19 @@ const VOOR_BASIS = [["op", "Meteen opgebruikt"], ["koelkast", "In de koelkast"],
 // Waar een portie vandaan komt als je elders op + drukt terwijl alles al verdeeld is.
 const BRONNEN = ["koelkast", "op", "ik", "vriezer", "ander"];
 
-const beginVerdeling = (n, basis) => (basis ? { koelkast: n } : { ik: Math.min(1, n), koelkast: Math.max(0, n - 1) });
 const som = (v) => Object.values(v).reduce((a, b) => a + b, 0);
+
+// Beginstand van de verdeling. Staat het gerecht op het menu met resten voor later (of met
+// een deel voor de vriezer), dan volgt die het plan: wat je nu eet, de resten in de koelkast,
+// de rest in de vriezer. Eet je met meer mensen, dan is één portie van jou.
+function beginVerdeling(n, basis, plan) {
+  if (basis) return { koelkast: n };
+  if (!plan || (!plan.resten && !plan.vriezer)) return { ik: Math.min(1, n), koelkast: Math.max(0, n - 1) };
+  const nu = Math.min(n, plan.nu);
+  const koelkast = Math.min(n - nu, plan.resten);
+  const ik = Math.min(1, nu);
+  return { ik, ander: nu - ik, koelkast, vriezer: n - nu - koelkast };
+}
 
 // Venster "Gekookt": zet het koken en wie wat gegeten heeft in het logboek, haalt de gebruikte
 // ingrediënten uit de voorraad, zet bewaarde porties in de koelkast/vriezer en haalt het
@@ -19,7 +30,9 @@ const som = (v) => Object.values(v).reduce((a, b) => a + b, 0);
 export function gekookt({ data, recept, porties, keuze, menuId = null, klaar }) {
   const basis = !recept.porties;
   const soorten = basis ? VOOR_BASIS : VOOR_PORTIES;
-  let verdeling = beginVerdeling(porties, basis);
+  const opMenu = menuId && data.menu.gerechten.find((g) => g.id === menuId);
+  const plan = opMenu ? kookVerdeling(opMenu, data.menu.gerechten) : null;
+  let verdeling = beginVerdeling(porties, basis, plan);
 
   const dlg = document.createElement("dialog");
   dlg.className = "dialoog";
@@ -88,7 +101,7 @@ export function gekookt({ data, recept, porties, keuze, menuId = null, klaar }) 
   toonVerdeling();
   toonVoorraad();
   form.porties.addEventListener("input", () => {
-    verdeling = beginVerdeling(aantal(), basis);
+    verdeling = beginVerdeling(aantal(), basis, plan);
     toonVerdeling();
     toonVoorraad();
   });
@@ -150,8 +163,16 @@ export function gekookt({ data, recept, porties, keuze, menuId = null, klaar }) 
           }
         });
       }
-      if (menuId && form.menu.checked) {
-        d = await wijzig("menu", (doc) => { doc.gerechten = doc.gerechten.filter((g) => g.id !== menuId); });
+      // De geplande resten liggen nu in de koelkast: die worden "uit de voorraad" eten.
+      if (menuId && (form.menu.checked || restenVan(data.menu.gerechten, menuId).length)) {
+        d = await wijzig("menu", (doc) => {
+          if (form.menu.checked) doc.gerechten = doc.gerechten.filter((g) => g.id !== menuId);
+          for (const g of doc.gerechten) {
+            if (g.van !== menuId) continue;
+            delete g.van;
+            g.uit = "voorraad";
+          }
+        });
       }
       dlg.close();
       melding(v.koelkast || v.vriezer ? "In het logboek gezet, porties bewaard" : "In het logboek gezet");
