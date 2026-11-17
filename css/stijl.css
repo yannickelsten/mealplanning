@@ -650,6 +650,15 @@ legend { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; co
 .dl-lijst small { color: var(--zacht); margin-left: auto; text-align: right; }
 .twee { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .dialoog .veld input, .dialoog .veld select { width: 100%; }
+/* resten van een kookbeurt: één rij per rest (dag, moment, porties, ×) */
+.dl-resten { display: grid; gap: 6px; margin: 4px 0 6px; }
+.dl-resten .dl-sub { font-size: .85rem; }
+.dl-resten .dl-sub small { color: var(--zacht); }
+.dl-rijen { display: grid; gap: 6px; }
+.restrij { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 3rem auto; gap: 6px; align-items: center; }
+.restrij select, .restrij input { font: inherit; font-size: .9rem; color: inherit; background: var(--kaart); min-width: 0;
+  border: 1px solid var(--lijn); border-radius: 8px; padding: 6px 4px 6px 8px; }
+.dl-resten .knop.klein { justify-self: start; }
 .dialoog .knop.primair:disabled { background: var(--lijn); border-color: var(--lijn); color: var(--zacht); }
 
 /* telefoon: koppelen, verbinding */

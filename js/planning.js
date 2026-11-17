@@ -773,6 +773,32 @@ const dagenTussen = (a, b) => dagenTot(b) - dagenTot(a);
 const vakSleutel = (dag, moment) => `${dag}|${moment}`;
 const basisId = (data, id) => data.recepten[id]?.variant_van || id;
 
+// Met hoeveel mensen je eet (keuze in het weekplan-venster).
+export const etersPerMaaltijd = (data) => data.instellingen.planner?.eters || 1;
+
+// Waar de resten van een kookbeurt `g` (met dag) heen kunnen: de eerstvolgende vrije vakken
+// (geen gerecht, geen "elders") binnen REST_DAGEN dagen, bij een moment dat bij het gerecht past
+// en dat je laat invullen (weekplan-keuze, anders lunch en avondeten), niet twee keer op een dag.
+// Zelfde regel als het weekplan. `bezet`: extra vakken ("dag|moment") die al gekozen zijn.
+// Geeft hooguit n vakken [{dag, moment}].
+export function restVoorstel(data, g, n, bezet = []) {
+  const momenten = (data.instellingen.planner?.momenten || ["lunch", "diner"])
+    .filter((m) => momentenVan(data.recepten[g.recept], data).includes(m))
+    .sort((a, b) => MOMENT_RANG[a] - MOMENT_RANG[b]);
+  const vol = new Set([...bezet, ...data.menu.gerechten.filter((x) => x.dag && x.id !== g.id)
+    .map((x) => vakSleutel(x.dag, x.elders ? x.moment : momentVan(x, data)))]);
+  const dagenMet = new Set([...bezet.map((s) => s.split("|")[0]), ...data.menu.gerechten
+    .filter((x) => x.dag && x.id !== g.id && x.van !== g.id && basisId(data, x.recept) === basisId(data, g.recept)).map((x) => x.dag)]);
+  const uit = [];
+  for (let na = 1; na <= REST_DAGEN && uit.length < n; na++) {
+    const dag = plusDagen(g.dag, na);
+    if (dag < vandaag() || dagenMet.has(dag)) continue;
+    const m = momenten.find((x) => !vol.has(vakSleutel(dag, x)));
+    if (m) uit.push({ dag, moment: m });
+  }
+  return uit;
+}
+
 // Een kookbeurt in een kopie van de gegevens "uitvoeren": ingrediënten en gebruikte
 // onderdelen gaan uit de voorraad van de kopie, zodat het volgende gerecht ziet wat er over is.
 function kookInKopie(kopie, g) {

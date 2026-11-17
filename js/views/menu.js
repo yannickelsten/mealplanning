@@ -1,8 +1,8 @@
 import { wijzig } from "../store.js";
 import { afgeleideTags } from "../voeding.js";
 import { MOMENTEN, MOMENT_NAAM, actieKort, afvinken, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking,
-  dezeWeek, gauwOp, heeftAanbiedingen, inDeAanbieding, kookVerdeling, laatstGegeten, momentVan, momentenVan, overlap,
-  restenVan } from "../planning.js";
+  dezeWeek, etersPerMaaltijd, gauwOp, heeftAanbiedingen, inDeAanbieding, kookVerdeling, laatstGegeten, momentVan, momentenVan,
+  overlap, restenVan, restVoorstel } from "../planning.js";
 import { dagenTot, datumNl, esc, geleden, houdbaar, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
 import { gekookt } from "./gekookt.js";
 import { aantalPorties, koppelPorties, portieActie, portiesHtml } from "./porties.js";
@@ -80,8 +80,9 @@ const eldersTegel = (g) => `<div class="wr-gerecht elders" data-elders="${esc(g.
     <button type="button" class="mini" data-weg-elders title="Weghalen" aria-label="Elders weghalen">×</button>
   </div>`;
 
-// Venster bij een gerecht op het menu: dag, moment, keuze, porties, en weghalen.
-function gerechtDialoog(g, data, kiesDagen, herteken) {
+// Venster bij een gerecht op het menu: dag, moment, keuze, porties, resten, en weghalen.
+// `voorstel`: net toegevoegd; de resten worden dan alvast voorgesteld (nog niet opgeslagen).
+function gerechtDialoog(g, data, kiesDagen, herteken, { voorstel = false } = {}) {
   const r = data.recepten[g.recept];
   const gerechten = data.menu.gerechten;
   const opties = r.keuzes?.opties || [];
@@ -91,7 +92,29 @@ function gerechtDialoog(g, data, kiesDagen, herteken) {
   const v = kook ? kookVerdeling(g, gerechten) : null;
   const dagen = g.dag && !kiesDagen.includes(g.dag) ? [g.dag, ...kiesDagen] : kiesDagen;
   const moment = momentVan(g, data);
-  const restTekst = resten.length ? `Rest: ${resten.map((x) => `${x.dag ? weekdag(x.dag) : "nog niet ingepland"} ${MOMENT_NAAM[momentVan(x, data)].toLowerCase()} (${x.porties})`).join(", ")}.` : "";
+
+  // Resten: rijen [dag, moment, porties]. Het menu zonder de eigen resten, om vrije vakken te zoeken.
+  const metResten = kook && r.porties && !g.gegeten;
+  const eters = etersPerMaaltijd(data);
+  const zonderResten = { ...data, menu: { gerechten: gerechten.filter((x) => x.van !== g.id) } };
+  const nuEten = voorstel ? Math.min(eters, g.porties) : v?.nu;
+  let rijen = resten.map((x) => ({ id: x.id, dag: x.dag || "", moment: momentVan(x, data), porties: x.porties }));
+  if (voorstel && g.dag) {
+    let over = g.porties - nuEten;
+    rijen = restVoorstel(zonderResten, g, Math.ceil(over / eters)).map((vak) => {
+      const p = Math.min(eters, over);
+      over -= p;
+      return { ...vak, porties: p };
+    });
+  }
+  const dagOpties = (gekozen) => [...new Set([...(gekozen ? [gekozen] : []), ...dagen])].sort()
+    .map((d) => `<option value="${d}" ${d === gekozen ? "selected" : ""}>${esc(datumNl(d).replace(/ \S+$/, ""))}</option>`).join(""); // "za 21"
+  const rijHtml = (x) => `<div class="restrij" data-rij="${esc(x.id || "")}">
+      <select name="r_dag" aria-label="Dag">${dagOpties(x.dag)}</select>
+      <select name="r_moment" aria-label="Moment">${MOMENTEN.map(([m, naam]) => `<option value="${m}" ${m === x.moment ? "selected" : ""}>${naam}</option>`).join("")}</select>
+      <input type="number" name="r_porties" min="1" step="1" value="${x.porties}" aria-label="Porties">
+      <button type="button" class="mini" data-rij-weg title="Rest weghalen" aria-label="Rest weghalen">×</button>
+    </div>`;
 
   const dlg = document.createElement("dialog");
   dlg.className = "dialoog";
@@ -108,11 +131,17 @@ function gerechtDialoog(g, data, kiesDagen, herteken) {
       `<option value="${esc(o.id)}" ${o.id === (g.keuze || opties[0].id) ? "selected" : ""}>${esc(o.naam)}</option>`).join("")}</select></label>` : ""}
     ${kook ? `<div class="twee">
         <label class="veld"><span>${r.porties ? "Porties koken" : "Keer maken"}</span><input type="number" name="porties" min="1" step="1" value="${g.porties}"></label>
-        ${r.porties ? `<label class="veld"><span>Daarvan nu eten</span><input type="number" name="eten" min="0" step="1" value="${v.nu}"></label>` : ""}
+        ${r.porties ? `<label class="veld"><span>Daarvan nu eten</span><input type="number" name="eten" min="0" step="1" value="${nuEten}"></label>` : ""}
       </div>
+      ${metResten ? `<div class="dl-resten"><span class="dl-sub">Resten <small>(later eten)</small></span>
+        ${voorstel ? `<p class="hint">Kies waar de resten komen en sla op.</p>` : ""}
+        <div class="dl-rijen">${rijen.map(rijHtml).join("")}</div>
+        <button type="button" class="knop klein" data-rij-erbij>+ rest</button>
+      </div>` : ""}
       <p class="hint dl-plan"></p>`
       : `<label class="veld"><span>Porties</span><input type="number" name="porties" min="1" step="1" value="${g.porties}"></label>`}
     ${g.van ? `<p class="hint">Dit is de rest van een kookbeurt; je kookt het dus niet opnieuw.</p>` : ""}
+    <p class="fout" hidden></p>
     <div class="knoppen">
       <button class="knop primair" type="submit">Opslaan</button>
       ${(kook || uitVoorraad) && !g.gegeten ? `<button class="knop" type="button" data-klaar>${uitVoorraad ? "Gegeten" : "Gekookt…"}</button>` : ""}
@@ -125,17 +154,56 @@ function gerechtDialoog(g, data, kiesDagen, herteken) {
   const form = dlg.querySelector("form");
   const getal = (naam, min) => Math.max(min, Math.round(Number(form[naam]?.value) || 0));
   const planEl = dlg.querySelector(".dl-plan");
+  const rijenEl = dlg.querySelector(".dl-rijen");
+  const leesRijen = () => [...dlg.querySelectorAll("[data-rij]")].map((el) => ({
+    id: el.dataset.rij || null, dag: el.querySelector("[name=r_dag]").value, moment: el.querySelector("[name=r_moment]").value,
+    porties: Math.max(1, Math.round(Number(el.querySelector("[name=r_porties]").value) || 1)) }));
+  const som = (xs) => xs.reduce((s, x) => s + x.porties, 0);
+  // "1 nu · 3 later · 0 naar de vriezer"
   const toonPlan = () => {
-    if (!planEl) return;
+    if (!planEl || !metResten) return;
     const n = getal("porties", 1);
-    const nu = Math.min(form.eten ? getal("eten", 0) : n, n);
-    const later = Math.min(v.resten, n - nu);
-    const vriezer = n - nu - later;
-    planEl.textContent = [restTekst, vriezer ? `${vriezer} ${vriezer === 1 ? "portie" : "porties"} naar de vriezer.` : "",
-      later < v.resten ? "Te weinig porties voor alle resten die gepland staan." : ""].filter(Boolean).join(" ");
+    const later = som(leesRijen());
+    const nu = Math.min(form.eten ? getal("eten", 0) : n - later, n);
+    const vriezer = Math.max(0, n - nu - later);
+    planEl.textContent = nu + later > n ? `Je kookt ${n} ${portieWoord(r, n)}: te weinig voor ${nu} nu en ${later} later.`
+      : [`${nu} nu`, `${later} later`, `${vriezer} naar de vriezer`].join(" · ");
   };
   toonPlan();
   form.addEventListener("input", toonPlan);
+  form.addEventListener("change", toonPlan);
+  if (metResten) {
+    rijenEl.addEventListener("click", (e) => {
+      if (!e.target.closest("[data-rij-weg]")) return;
+      e.target.closest("[data-rij]").remove();
+      toonPlan();
+    });
+    // + rest: het volgende vrije vak (zelfde regel als het weekplan), anders de dag na de laatste rest.
+    dlg.querySelector("[data-rij-erbij]").addEventListener("click", () => {
+      const huidige = leesRijen();
+      const dag = form.dag.value;
+      const vak = dag && restVoorstel(zonderResten, { ...g, dag }, 1, huidige.map((x) => `${x.dag}|${x.moment}`))[0];
+      const laatste = huidige.map((x) => x.dag).sort().at(-1) || dag || dagen[0];
+      const over = getal("porties", 1) - (form.eten ? getal("eten", 0) : 0) - som(huidige);
+      rijenEl.insertAdjacentHTML("beforeend", rijHtml({ ...(vak || { dag: plusDagen(laatste, 1), moment: form.moment.value }),
+        porties: over > 0 ? Math.min(eters, over) : eters }));
+      toonPlan();
+    });
+    // Schuift het koken op, dan schuiven de resten mee.
+    let vorigeDag = form.dag.value;
+    form.dag.addEventListener("change", () => {
+      const nieuw = form.dag.value;
+      if (vorigeDag && nieuw) {
+        const verschil = dagenTot(nieuw) - dagenTot(vorigeDag);
+        for (const sel of rijenEl.querySelectorAll("[name=r_dag]")) {
+          const d = plusDagen(sel.value, verschil);
+          sel.innerHTML = dagOpties(d);
+          sel.value = d;
+        }
+      }
+      vorigeDag = nieuw;
+    });
+  }
   dlg.addEventListener("close", () => dlg.remove());
   dlg.querySelector("[data-annuleer]").addEventListener("click", () => dlg.close());
   const pas = (fn) => wijzig("menu", (doc) => {
@@ -148,10 +216,28 @@ function gerechtDialoog(g, data, kiesDagen, herteken) {
     const dag = form.dag.value || null;
     const porties = getal("porties", 1);
     const eten = form.eten ? Math.min(getal("eten", 0), porties) : null;
+    const rijenNu = metResten ? leesRijen() : [];
+    // Resten komen ná het koken: een latere dag, of later op dezelfde dag.
+    const rang = (m) => MOMENTEN.findIndex(([x]) => x === m);
+    const foutEl = dlg.querySelector(".fout");
+    const probleem = rijenNu.length && !dag ? "Kies eerst een dag voor het koken."
+      : rijenNu.some((x) => x.dag < dag || (x.dag === dag && rang(x.moment) <= rang(form.moment.value))) ? "Een rest moet ná het koken komen."
+      : som(rijenNu) > porties ? `Er staan meer porties als rest (${som(rijenNu)}) dan je kookt (${porties}).` : "";
+    if (probleem) { foutEl.textContent = probleem; foutEl.hidden = false; return; }
     pas((x, doc) => {
+      if (metResten) {
+        // De rijen zijn de resten: bestaande bijwerken, weggehaalde weg, nieuwe erbij.
+        const houden = new Set(rijenNu.map((y) => y.id).filter(Boolean));
+        doc.gerechten = doc.gerechten.filter((y) => y.van !== x.id || houden.has(y.id));
+        for (const rij of rijenNu) {
+          let y = rij.id && doc.gerechten.find((z) => z.id === rij.id);
+          if (!y) doc.gerechten.push(y = { id: nieuwId(), recept: x.recept, van: x.id });
+          Object.assign(y, { porties: rij.porties, dag: rij.dag, moment: rij.moment });
+        }
+      }
       const eigenResten = kook ? restenVan(doc.gerechten, x.id) : [];
-      // Schuift de kookbeurt een paar dagen op, dan schuiven de resten mee.
-      if (x.dag && dag && dag !== x.dag) {
+      // Zonder restenblok (basisrecept): schuift het koken op, dan schuiven de resten mee.
+      if (!metResten && x.dag && dag && dag !== x.dag) {
         const verschil = dagenTot(dag) - dagenTot(x.dag);
         for (const y of eigenResten) if (y.dag) y.dag = plusDagen(y.dag, verschil);
       }
@@ -406,10 +492,16 @@ export function menu(main, data, sortering) {
     const [soort, id] = sel.value.split(":");
     if (!id) return;
     const r = data.recepten[id];
-    wijzig("menu", (doc) => {
-      doc.gerechten.push({ id: nieuwId(), recept: id, porties: soort === "v" ? 1 : r.porties || 1,
-        dag, moment, ...(soort === "v" ? { uit: "voorraad" } : {}) });
-    }).then(herteken, fout);
+    const nieuw = { id: nieuwId(), recept: id, porties: soort === "v" ? 1 : r.porties || 1,
+      dag, moment, ...(soort === "v" ? { uit: "voorraad" } : {}) };
+    wijzig("menu", (doc) => { doc.gerechten.push(nieuw); }).then((d) => {
+      herteken(d);
+      // Meer porties dan je in één keer eet: meteen het venster, met de resten alvast voorgesteld.
+      if (soort === "r" && r.porties > etersPerMaaltijd(d)) {
+        const g = d.menu.gerechten.find((x) => x.id === nieuw.id);
+        if (g) gerechtDialoog(g, d, kiesDagen, herteken, { voorstel: true });
+      }
+    }, fout);
   }));
   main.querySelectorAll("[data-weg-elders]").forEach((b) => b.addEventListener("click", () => {
     const id = b.closest("[data-elders]").dataset.elders;
