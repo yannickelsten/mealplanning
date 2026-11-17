@@ -250,9 +250,24 @@ export function inVerpakkingen(lijst, ing, eenheden) {
   return { hoeveelheid: Math.max(1, Math.ceil(g / v[1] - 0.02)), eenheid: v[0] };
 }
 
-// Gerechten op het menu die gekookt moeten worden (niet: "uit de voorraad" opeten, en niet de
-// rest van een kookbeurt die al op het menu staat).
-export const teKoken = (data) => data.menu.gerechten.filter((g) => g.uit !== "voorraad" && !g.van && data.recepten[g.recept]);
+// Gerechten op het menu die gekookt moeten worden (niet: "uit de voorraad" opeten, niet de
+// rest van een kookbeurt die al op het menu staat, en niet wat al gekookt/gegeten is).
+export const teKoken = (data) => data.menu.gerechten.filter((g) => g.uit !== "voorraad" && !g.van && !g.gegeten && data.recepten[g.recept]);
+
+// Een gerecht op het menu afvinken (gekookt of gegeten): het blijft grijs in het rooster staan,
+// op de dag dat je het at. Was dat een voorbije dag (later ingevuld), dan gaat het weg. Meteen
+// opruimen: afgevinkte gerechten en "elders" van voorbije dagen (het rooster toont die niet meer).
+// Werkt op het menu-document (in wijzig("menu", …)).
+export function afvinken(doc, id, datum = vandaag()) {
+  const nu = vandaag();
+  for (const g of doc.gerechten) {
+    if (g.id !== id) continue;
+    g.gegeten = true;
+    if (datum >= nu) g.dag = datum;
+    else delete g.dag; // voorbij: wordt hieronder opgeruimd
+  }
+  doc.gerechten = doc.gerechten.filter((g) => !((g.gegeten || g.elders) && (!g.dag || g.dag < nu)));
+}
 
 // ---- Maaltijdmomenten ----
 export const MOMENTEN = [["ontbijt", "Ontbijt"], ["lunch", "Lunch"], ["diner", "Avondeten"], ["snack", "Tussendoor"]];
@@ -292,7 +307,7 @@ export function kookVerdeling(g, gerechten) {
 
 // De kookbeurt van een recept op het menu (niet: een rest of een portie uit de voorraad), de vroegste eerst.
 export const kookbeurtOpMenu = (data, id) => data.menu.gerechten
-  .filter((g) => g.recept === id && !g.van && g.uit !== "voorraad")
+  .filter((g) => g.recept === id && !g.van && g.uit !== "voorraad" && !g.gegeten)
   .sort((a, b) => (a.dag || "9").localeCompare(b.dag || "9"))[0];
 
 // ---- Wat "in huis" is zonder hoeveelheid (olie, sauzen, kruiden) raakt ook op ----
@@ -708,7 +723,8 @@ export function dezeWeek(data) {
     for (const k of kenmerken(data.recepten[r.variant_van] || r, data)) telling.set(k, (telling.get(k) || 0) + 1);
   };
   for (const m of data.logboek.maaltijden) if (zelfGegeten(m) && dagenTot(m.datum) >= -6) tel(m.recept);
-  for (const g of data.menu.gerechten) if (!g.van) tel(g.recept); // een rest is hetzelfde gerecht
+  // Een rest is hetzelfde gerecht; wat al gegeten is, staat al in het logboek.
+  for (const g of data.menu.gerechten) if (!g.van && !g.gegeten) tel(g.recept);
   return telling;
 }
 
@@ -878,11 +894,15 @@ export function stelPlanVoor(data, opties = {}) {
   const uitgesloten = new Set(opties.uitgesloten || []);
   const dagLijst = Array.from({ length: dagen }, (_, n) => plusDagen(begin, n));
   const volgorde = MOMENTEN.map(([m]) => m).filter((m) => momenten.includes(m));
-  const vakken = dagLijst.flatMap((dag) => volgorde.map((moment) => ({ dag, moment })));
+  // `alleen`: ["dag|moment", …] = alleen deze vakken invullen (na "Ik eet hier niet").
+  const alleen = opties.alleen && new Set(opties.alleen);
+  const vakken = dagLijst.flatMap((dag) => volgorde.map((moment) => ({ dag, moment })))
+    .filter((v) => !alleen || alleen.has(vakSleutel(v.dag, v.moment)));
 
   // Werken op een kopie: het menu krijgt de voorstellen erbij, de voorraad raakt op.
+  // "Elders" (geen recept) houdt alleen zijn vak bezet.
   const kopie = { ...data,
-    menu: { gerechten: data.menu.gerechten.filter((g) => data.recepten[g.recept]) },
+    menu: { gerechten: data.menu.gerechten.filter((g) => g.elders || data.recepten[g.recept]) },
     voorraad: { ingredienten: data.voorraad.ingredienten.map((p) => ({ ...p })),
       porties: data.voorraad.porties.map((p) => ({ ...p })) } };
   const bezet = new Set();
@@ -890,6 +910,7 @@ export function stelPlanVoor(data, opties = {}) {
   const opDag = new Set(); // "dag|basisrecept": niet twee keer hetzelfde op één dag
   const neem = (g) => {
     if (g.dag) bezet.add(vakSleutel(g.dag, momentVan(g, data)));
+    if (g.elders) return;
     gebruikt.add(basisId(data, g.recept));
     if (g.dag) opDag.add(`${g.dag}|${basisId(data, g.recept)}`);
   };
@@ -898,17 +919,17 @@ export function stelPlanVoor(data, opties = {}) {
   for (const g of teKoken(kopie)) kookInKopie(kopie, g);
   const uitVoorraadGepland = new Map();
   for (const g of kopie.menu.gerechten) {
-    if (g.uit === "voorraad") uitVoorraadGepland.set(g.recept, (uitVoorraadGepland.get(g.recept) || 0) + g.porties);
+    if (g.uit === "voorraad" && !g.gegeten) uitVoorraadGepland.set(g.recept, (uitVoorraadGepland.get(g.recept) || 0) + g.porties);
   }
 
   const uit = [];
   let teller = 0;
   const tid = () => `${opties.sleutel || `v${ronde}`}-${++teller}`; // sleutel: uniek per aanroep
-  // Vorige ronde: blijft staan. Afgewezen vakken blijven leeg, dat recept komt niet terug.
+  // Vorige ronde: blijft staan. Afgewezen vakken (✗ = "hier eet ik niet") blijven leeg; het
+  // gerecht zelf mag nog wel ergens anders ("Ander gerecht" sluit een gerecht uit).
   for (const v of vast) {
     bezet.add(vakSleutel(v.dag, v.moment));
-    if (v.aan === false) { if (!v.van && !v.uit) uitgesloten.add(v.recept); }
-    else {
+    if (v.aan !== false) {
       neem(v);
       if (!v.van && !v.uit) kookInKopie(kopie, v);
       if (v.uit === "voorraad") uitVoorraadGepland.set(v.recept, (uitVoorraadGepland.get(v.recept) || 0) + v.porties);

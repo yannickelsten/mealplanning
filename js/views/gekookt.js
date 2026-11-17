@@ -1,5 +1,5 @@
 import { wijzig } from "../store.js";
-import { afboeken, kookVerdeling, onderdelenAfnemen, restenVan, soortVan, toonPartijen, verbruik } from "../planning.js";
+import { afboeken, afvinken, kookVerdeling, onderdelenAfnemen, restenVan, soortVan, toonPartijen, verbruik } from "../planning.js";
 import { breuk, esc, melding, nieuwId, vandaag } from "../util.js";
 
 // Wat er met de porties kan gebeuren. Basisrecepten (porties null: hoemoes, crispy tofu…)
@@ -26,7 +26,7 @@ function beginVerdeling(n, basis, plan) {
 
 // Venster "Gekookt": zet het koken en wie wat gegeten heeft in het logboek, haalt de gebruikte
 // ingrediënten uit de voorraad, zet bewaarde porties in de koelkast/vriezer en haalt het
-// gerecht van het menu. Daarna wordt `klaar(data)` aangeroepen.
+// gerecht op het menu af (het blijft grijs staan). Daarna wordt `klaar(data)` aangeroepen.
 export function gekookt({ data, recept, porties, keuze, menuId = null, klaar }) {
   const basis = !recept.porties;
   const soorten = basis ? VOOR_BASIS : VOOR_PORTIES;
@@ -50,7 +50,7 @@ export function gekookt({ data, recept, porties, keuze, menuId = null, klaar }) 
       <p class="dl-rest hint"></p>
     </div>
     <div class="dl-voorraad"></div>
-    ${menuId ? `<label class="vink"><input type="checkbox" name="menu" checked> van het menu halen</label>` : ""}
+    ${menuId ? `<label class="vink"><input type="checkbox" name="menu" checked> op het menu afvinken</label>` : ""}
     <p class="fout" hidden></p>
     <div class="knoppen"><button class="knop primair" type="submit">Opslaan</button>
       <button class="knop" type="button" data-annuleer>Annuleren</button></div>
@@ -166,12 +166,12 @@ export function gekookt({ data, recept, porties, keuze, menuId = null, klaar }) 
       // De geplande resten liggen nu in de koelkast: die worden "uit de voorraad" eten.
       if (menuId && (form.menu.checked || restenVan(data.menu.gerechten, menuId).length)) {
         d = await wijzig("menu", (doc) => {
-          if (form.menu.checked) doc.gerechten = doc.gerechten.filter((g) => g.id !== menuId);
           for (const g of doc.gerechten) {
             if (g.van !== menuId) continue;
             delete g.van;
             g.uit = "voorraad";
           }
+          if (form.menu.checked) afvinken(doc, menuId, datum);
         });
       }
       dlg.close();

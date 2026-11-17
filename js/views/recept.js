@@ -57,8 +57,8 @@ export function recept(main, data, id) {
     .filter((x) => x.variant_van === basisId)].filter(Boolean);
   const optie = opties.find((o) => o.id === s.keuze);
   const cat = data.categorieen.find((c) => c.id === r.categorie);
-  const opMenu = data.menu.gerechten.some((g) => g.recept === id);
-  const kookbeurt = kookbeurtOpMenu(data, id); // die wordt bij "Gekookt…" van het menu gehaald
+  const opMenu = data.menu.gerechten.some((g) => g.recept === id && !g.gegeten);
+  const kookbeurt = kookbeurtOpMenu(data, id); // die wordt bij "Gekookt…" op het menu afgevinkt
   const keerGegeten = data.logboek.maaltijden.filter((m) => m.recept === id && zelfGegeten(m));
   const laatst = keerGegeten.map((m) => m.datum).sort().at(-1);
   const bewaard = data.voorraad.porties.filter((p) => p.recept === id);

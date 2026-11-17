@@ -1,12 +1,12 @@
 import { wijzig } from "../store.js";
 import { afgeleideTags } from "../voeding.js";
-import { MOMENTEN, MOMENT_NAAM, actieReden, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking,
+import { MOMENTEN, MOMENT_NAAM, actieReden, afvinken, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking,
   dezeWeek, gauwOp, heeftAanbiedingen, inDeAanbieding, kookVerdeling, laatstGegeten, momentVan, momentenVan, overlap,
   restenVan } from "../planning.js";
 import { dagenTot, datumNl, esc, geleden, houdbaar, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
 import { gekookt } from "./gekookt.js";
 import { aantalPorties, koppelPorties, portieActie, portiesHtml } from "./porties.js";
-import { huidigVoorstel, koppelVoorstel, planDialoog, voorstelBalk, voorstelTegel } from "./weekplan.js";
+import { huidigVoorstel, koppelVoorstel, planDialoog, stelVoorIn, voorstelBalk, voorstelTegel } from "./weekplan.js";
 
 // Keuzes blijven bewaard zolang de pagina open is.
 const f = { sortering: "lang", categorie: "alle", vegetarisch: false, aantal: 9, week: null };
@@ -60,18 +60,25 @@ function tegelMeta(g, data, gerechten) {
 }
 
 // Eén gerecht in het weekrooster. Tikken op de naam opent het venster met alle keuzes.
+// Afgevinkt (gekookt/gegeten): grijs, zonder knop.
 function tegel(g, data, gerechten) {
   const r = data.recepten[g.recept];
   const soort = g.uit === "voorraad" ? "voorraad" : g.van ? "rest" : "kook";
-  const { tekst, let_op } = tegelMeta(g, data, gerechten);
-  const knop = soort === "voorraad" ? "Gegeten" : soort === "kook" ? "Gekookt" : "";
-  return `<div class="wr-gerecht ${soort}" data-id="${esc(g.id)}">
+  const { tekst, let_op } = g.gegeten ? { tekst: soort === "kook" ? "✓ gekookt" : "✓ gegeten" } : tegelMeta(g, data, gerechten);
+  const knop = g.gegeten ? "" : soort === "voorraad" ? "Gegeten" : soort === "kook" ? "Gekookt" : "";
+  return `<div class="wr-gerecht ${soort}${g.gegeten ? " gegeten" : ""}" data-id="${esc(g.id)}">
     <button type="button" class="wr-titel" data-open title="Aanpassen">${esc(r.titel)}</button>
     <small class="wr-meta">${esc(tekst)}</small>
     ${let_op ? `<small class="wr-letop">${esc(let_op)}</small>` : ""}
     ${knop ? `<button type="button" class="knop klein" data-klaar>${knop}</button>` : ""}
   </div>`;
 }
+
+// "Elders": in dit vak eet je niet thuis; de planner vult het niet in.
+const eldersTegel = (g) => `<div class="wr-gerecht elders" data-elders="${esc(g.id)}">
+    <span class="wr-titel">Elders</span>
+    <button type="button" class="mini" data-weg-elders title="Weghalen" aria-label="Elders weghalen">×</button>
+  </div>`;
 
 // Venster bij een gerecht op het menu: dag, moment, keuze, porties, en weghalen.
 function gerechtDialoog(g, data, kiesDagen, herteken) {
@@ -108,8 +115,9 @@ function gerechtDialoog(g, data, kiesDagen, herteken) {
     ${g.van ? `<p class="hint">Dit is de rest van een kookbeurt; je kookt het dus niet opnieuw.</p>` : ""}
     <div class="knoppen">
       <button class="knop primair" type="submit">Opslaan</button>
-      ${kook || uitVoorraad ? `<button class="knop" type="button" data-klaar>${uitVoorraad ? "Gegeten" : "Gekookt…"}</button>` : ""}
+      ${(kook || uitVoorraad) && !g.gegeten ? `<button class="knop" type="button" data-klaar>${uitVoorraad ? "Gegeten" : "Gekookt…"}</button>` : ""}
       <button class="knop" type="button" data-annuleer>Annuleren</button>
+      ${g.dag && !g.gegeten ? `<button class="knop" type="button" data-elders title="Dit vak wordt 'Elders'; wat ervan afhing wordt opnieuw voorgesteld">Ik eet hier niet</button>` : ""}
       <button class="knop gevaar" type="button" data-weg>Van het menu halen</button>
     </div>
   </form>`;
@@ -163,6 +171,20 @@ function gerechtDialoog(g, data, kiesDagen, herteken) {
     // Een kookbeurt weghalen haalt ook de resten ervan weg.
     doc.gerechten = doc.gerechten.filter((y) => y.id !== g.id && !(kook && y.van === g.id));
   }));
+  // "Ik eet hier niet": het vak wordt Elders. Bij een kookbeurt gaan de resten mee weg, en voor
+  // die vrijgekomen vakken komt meteen een voorstel (zelfde knoppen als bij het weekplan).
+  dlg.querySelector("[data-elders]")?.addEventListener("click", () => {
+    const vrij = (kook ? resten : []).filter((y) => y.dag && y.dag >= vandaag()).map((y) => ({ dag: y.dag, moment: momentVan(y, data) }));
+    wijzig("menu", (doc) => {
+      doc.gerechten = doc.gerechten.filter((y) => y.id !== g.id && !(kook && y.van === g.id));
+      doc.gerechten.push({ id: nieuwId(), dag: g.dag, moment, elders: true });
+    }).then((d) => {
+      dlg.close();
+      const voorstel = stelVoorIn(d, vrij);
+      melding(voorstel ? "Elders gezet; voor de vrijgekomen vakken staat een voorstel klaar" : "Elders gezet");
+      herteken(d);
+    }, fout);
+  });
   dlg.querySelector("[data-klaar]")?.addEventListener("click", () => { dlg.close(); klaarMet(g, data, herteken); });
   dlg.showModal();
 }
@@ -175,12 +197,14 @@ function klaarMet(g, data, herteken) {
   }
   // Uit de voorraad: de portie die het eerst op moet.
   const p = bewaardePorties(data).find((x) => x.recept === g.recept);
-  const vanMenu = () => wijzig("menu", (doc) => { doc.gerechten = doc.gerechten.filter((y) => y.id !== g.id); }).then(herteken, fout);
   if (!p) {
-    if (confirm(`Er ligt geen ${r.titel} meer in de koelkast of vriezer. Van het menu halen?`)) vanMenu();
+    if (confirm(`Er ligt geen ${r.titel} meer in de koelkast of vriezer. Van het menu halen?`)) {
+      wijzig("menu", (doc) => { doc.gerechten = doc.gerechten.filter((y) => y.id !== g.id); }).then(herteken, fout);
+    }
     return;
   }
-  portieActie(data, p, "eten", vanMenu);
+  // Gegeten: blijft grijs op het menu staan.
+  portieActie(data, p, "eten", () => wijzig("menu", (doc) => afvinken(doc, g.id)).then(herteken, fout));
 }
 
 function suggestieKaart(i, opMenu, metVoorraad) {
@@ -227,8 +251,9 @@ export function menu(main, data, sortering) {
 
   // Weekrooster
   const gerechten = data.menu.gerechten.filter((g) => data.recepten[g.recept]);
-  const opMenu = new Set(gerechten.map((g) => g.recept));
-  const inTePlannen = gerechten.filter((g) => !g.dag || g.dag < nu);
+  const elders = data.menu.gerechten.filter((g) => g.elders);
+  const opMenu = new Set(gerechten.filter((g) => !g.gegeten).map((g) => g.recept));
+  const inTePlannen = gerechten.filter((g) => !g.gegeten && (!g.dag || g.dag < nu));
   const lijst = boodschappenlijst(data);
   const teKopen = lijst.filter((x) => x.status === "kopen" && !x.later).length + data.boodschappen.extra.length;
   const bewaardeRecepten = [...new Set(data.voorraad.porties.map((p) => p.recept))].filter((id) => data.recepten[id]);
@@ -244,16 +269,18 @@ export function menu(main, data, sortering) {
       ${receptOpties(data, (r) => !momentenVan(r, data).includes(m))}`];
   }));
   const toevoegKeuze = (dag, m) => `<select class="dag-toevoegen" data-dag="${dag}" data-moment="${m}" aria-label="${esc(MOMENT_NAAM[m])} toevoegen op ${esc(datumNl(dag))}">
-    <option value="">+ toevoegen…</option>${optiesPerMoment[m]}</select>`;
+    <option value="">+ toevoegen…</option><option value="elders">Ik eet elders</option>${optiesPerMoment[m]}</select>`;
   const rooster = `<div class="weekrooster" style="--dagen: ${zichtbaar}">
     <div class="wr-labels" aria-hidden="true"><div></div>${MOMENTEN.map(([, naam]) => `<div class="wr-label">${naam}</div>`).join("")}</div>
     ${weekDagen.map((d) => `<section class="wr-dag${d === nu ? " vandaag" : ""}">
       <h3 class="wr-dagkop">${esc(weekdag(d))} <small>${esc(datumNl(d).replace(/^\S+ /, ""))}${d === nu ? " · vandaag" : ""}</small></h3>
       ${MOMENTEN.map(([m, naam]) => {
         const hier = gerechten.filter((g) => g.dag === d && momentVan(g, data) === m);
+        const weg = elders.filter((g) => g.dag === d && g.moment === m);
         const vs = voorstel ? voorstel.items.filter((i) => i.dag === d && i.moment === m) : [];
-        return `<div class="wr-cel${hier.length || vs.length ? "" : " leeg"}">
+        return `<div class="wr-cel${hier.length || vs.length || weg.length ? "" : " leeg"}">
           <span class="wr-celkop">${naam}</span>
+          ${weg.map(eldersTegel).join("")}
           ${hier.map((g) => tegel(g, data, gerechten)).join("")}
           ${vs.map((i) => voorstelTegel(i, data)).join("")}
           ${toevoegKeuze(d, m)}
@@ -367,13 +394,21 @@ export function menu(main, data, sortering) {
     herteken(data);
   }));
   main.querySelectorAll(".dag-toevoegen").forEach((sel) => sel.addEventListener("change", () => {
+    const { dag, moment } = sel.dataset;
+    if (sel.value === "elders") {
+      return wijzig("menu", (doc) => { doc.gerechten.push({ id: nieuwId(), dag, moment, elders: true }); }).then(herteken, fout);
+    }
     const [soort, id] = sel.value.split(":");
     if (!id) return;
     const r = data.recepten[id];
     wijzig("menu", (doc) => {
       doc.gerechten.push({ id: nieuwId(), recept: id, porties: soort === "v" ? 1 : r.porties || 1,
-        dag: sel.dataset.dag, moment: sel.dataset.moment, ...(soort === "v" ? { uit: "voorraad" } : {}) });
+        dag, moment, ...(soort === "v" ? { uit: "voorraad" } : {}) });
     }).then(herteken, fout);
+  }));
+  main.querySelectorAll("[data-weg-elders]").forEach((b) => b.addEventListener("click", () => {
+    const id = b.closest("[data-elders]").dataset.elders;
+    wijzig("menu", (doc) => { doc.gerechten = doc.gerechten.filter((g) => g.id !== id); }).then(herteken, fout);
   }));
   main.querySelectorAll(".wr-gerecht[data-id]").forEach((el) => {
     const g = gerechten.find((x) => x.id === el.dataset.id);

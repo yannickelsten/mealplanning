@@ -4,7 +4,7 @@
 // gewoon opnieuw getekend worden.
 import { wijzig } from "../store.js";
 import { MOMENTEN, boodschappenlijst, stelPlanVoor } from "../planning.js";
-import { datumNl, esc, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
+import { dagenTot, datumNl, esc, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
 
 let voorstel = null; // {opties, ronde, items, uitgesloten}
 let aanroepen = 0;
@@ -19,9 +19,47 @@ function maak(data, opties, { ronde = 0, vast = [], uitgesloten = new Set() } = 
   voorstel = { opties, ronde, items, uitgesloten };
 }
 
-// Een rest telt alleen als de kookbeurt ook aangevinkt is.
+// Opnieuw voorstellen met deze items vast; alleen de vrije vakken worden (opnieuw) ingevuld.
+const herplan = (data, vast, uitgesloten = voorstel.uitgesloten) =>
+  maak(data, voorstel.opties, { ronde: voorstel.ronde, vast, uitgesloten });
+
 const kookVan = (i) => (i.van ? voorstel.items.find((x) => x.tid === i.van) : null);
-const actief = (i) => i.aan && (!i.van || kookVan(i)?.aan !== false);
+const actief = (i) => i.aan; // een rest van een afgewezen kookbeurt bestaat niet (zie nietHier)
+const vak = (i) => `${i.dag}|${i.moment}`;
+
+// ✗ = "hier eet ik niet": het vak blijft leeg. Bij een kookbeurt worden de vakken van zijn resten
+// opnieuw ingevuld (vaak met hetzelfde gerecht, een maaltijd later); de oude resten blijven
+// bewaard, zodat ✓ alles weer precies terugzet.
+function nietHier(data, i) {
+  i.aan = false;
+  const resten = voorstel.items.filter((x) => x.van === i.tid);
+  if (!resten.length) return;
+  i.oudeResten = resten;
+  herplan(data, voorstel.items.filter((x) => !resten.includes(x)));
+}
+function welHier(data, i) {
+  i.aan = true;
+  if (!i.oudeResten) return;
+  // Wat intussen in die vakken voorgesteld is (en de resten daarvan) maakt weer plaats.
+  const vakken = new Set(i.oudeResten.map(vak));
+  const weg = new Set(voorstel.items.filter((x) => vakken.has(vak(x))).map((x) => x.tid));
+  for (const x of voorstel.items) if (weg.has(x.van)) weg.add(x.tid);
+  const terug = i.oudeResten;
+  delete i.oudeResten;
+  herplan(data, [...voorstel.items.filter((x) => !weg.has(x.tid)), ...terug]);
+}
+
+// Na "Ik eet hier niet" op het menu: een voorstel voor alleen de vakken die vrijkwamen.
+export function stelVoorIn(data, vakken) {
+  if (voorstel || !vakken.length) return false;
+  const dagen = vakken.map((v) => v.dag).sort();
+  const begin = dagen[0] < vandaag() ? vandaag() : dagen[0];
+  const opties = { begin, dagen: dagenTot(dagen.at(-1)) - dagenTot(begin) + 1, eters: data.instellingen.planner?.eters || 1,
+    momenten: [...new Set(vakken.map((v) => v.moment))], alleen: vakken.map(vak) };
+  maak(data, opties);
+  if (!voorstel.items.length) { voorstel = null; return false; }
+  return true;
+}
 
 // Het venster met de keuzes. `klaar(opties)` tekent daarna opnieuw.
 export function planDialoog(data, klaar) {
@@ -89,19 +127,18 @@ export function voorstelTegel(i, data) {
     meta = [`${n(i.porties)} koken`, (later || vriezer) && `${i.eten} nu`, later && `${later} later`,
       vriezer && `${vriezer} naar de vriezer`].filter(Boolean).join(" · ");
   }
-  const kookUit = i.van && kookVan(i)?.aan === false;
   const aan = actief(i);
   return `<div class="wr-gerecht voorstel${aan ? "" : " af"}" data-tid="${esc(i.tid)}">
-    <span class="wr-voorsteltag">voorstel</span>
+    <span class="wr-voorsteltag">${aan ? "voorstel" : "hier eet ik niet"}</span>
     <a class="wr-titel" href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>
     <small class="wr-meta">${esc(meta)}</small>
     ${i.redenen?.length && aan ? `<small class="wr-reden">${esc(i.redenen.join(" · "))}</small>` : ""}
-    ${kookUit ? `<small class="wr-meta">valt weg: het koken is afgewezen</small>` : `<span class="wr-keuze">
+    <span class="wr-keuze">
       <span class="janee" role="group" aria-label="Nemen?">
-        <button type="button" class="mini" data-ja aria-pressed="${i.aan}" title="Nemen">✓</button><button type="button" class="mini" data-nee aria-pressed="${!i.aan}" title="Niet nemen">✗</button>
+        <button type="button" class="mini" data-ja aria-pressed="${i.aan}" title="Nemen">✓</button><button type="button" class="mini" data-nee aria-pressed="${!i.aan}" title="Hier eet ik niet">✗</button>
       </span>
-      ${i.uit ? "" : `<button type="button" class="knop klein" data-ander>Ander gerecht</button>`}
-    </span>`}
+      ${i.uit || !aan ? "" : `<button type="button" class="knop klein" data-ander>Ander gerecht</button>`}
+    </span>
   </div>`;
 }
 
@@ -117,8 +154,9 @@ export function voorstelBalk(data, laatsteDag) {
   return `<div class="voorstelbalk">
     <p><b>Voorstel ${esc(datumNl(opties.begin))} – ${esc(datumNl(eind))}</b>: ${aan.length} van ${items.length} maaltijden,
       ${koken}× koken${aan.length ? ` · daarna ${teKopen} ${teKopen === 1 ? "ding" : "dingen"} op de boodschappenlijst` : ""}.</p>
-    <p class="hint">Gestippeld = voorstel, er staat nog niets op het menu. Kies ✗ voor wat je niet wilt
-      (dat vak blijft leeg), of "Ander gerecht".${verder ? " Een deel staat verder in de tijd: kijk met ›." : ""}</p>
+    <p class="hint">Gestippeld = voorstel, er staat nog niets op het menu. Kies ✗ waar je niet eet (dat vak
+      blijft leeg; resten die ervan afhingen worden opnieuw ingevuld), of "Ander gerecht" voor iets
+      anders.${verder ? " Een deel staat verder in de tijd: kijk met ›." : ""}</p>
     <div class="knoppen">
       <button class="knop primair" type="button" data-accepteer ${aan.length ? "" : "disabled"}>Aangevinkte op het menu zetten</button>
       <button class="knop" type="button" data-opnieuw>Opnieuw voorstellen</button>
@@ -129,7 +167,7 @@ export function voorstelBalk(data, laatsteDag) {
 
 // Een voorstel als gerecht op het menu (tid wordt later een echte id).
 function naarMenu(i) {
-  const { tid, aan, redenen, ...g } = i;
+  const { tid, aan, redenen, oudeResten, ...g } = i;
   return { id: tid, ...g };
 }
 
@@ -162,16 +200,15 @@ export function koppelVoorstel(main, data, herteken) {
   main.querySelectorAll(".wr-gerecht.voorstel").forEach((el) => {
     const i = voorstel.items.find((x) => x.tid === el.dataset.tid);
     if (!i) return;
-    el.querySelector("[data-ja]")?.addEventListener("click", () => { i.aan = true; opnieuw(); });
-    el.querySelector("[data-nee]")?.addEventListener("click", () => { i.aan = false; opnieuw(); });
+    el.querySelector("[data-ja]")?.addEventListener("click", () => { if (!i.aan) welHier(data, i); opnieuw(); });
+    el.querySelector("[data-nee]")?.addEventListener("click", () => { if (i.aan) nietHier(data, i); opnieuw(); });
     el.querySelector("[data-ander]")?.addEventListener("click", () => {
       // Alleen dit vak (en bij een kookbeurt ook de resten ervan) opnieuw invullen; de rest blijft.
       const kook = !i.van && !i.uit;
       const weg = new Set([i.tid, ...(kook ? voorstel.items.filter((x) => x.van === i.tid).map((x) => x.tid) : [])]);
-      const vast = voorstel.items.filter((x) => !weg.has(x.tid)).map((x) => ({ ...x, aan: actief(x) }));
       const uitgesloten = new Set(voorstel.uitgesloten);
       if (kook) uitgesloten.add(i.recept);
-      maak(data, voorstel.opties, { ronde: voorstel.ronde, vast, uitgesloten });
+      herplan(data, voorstel.items.filter((x) => !weg.has(x.tid)), uitgesloten);
       opnieuw();
     });
   });
