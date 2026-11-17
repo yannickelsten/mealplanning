@@ -849,8 +849,14 @@ export function inDeAanbieding(r, data, dag = plusDagen(vandaag(), 6), cache = n
     .filter((x) => x.a);
 }
 
-export const actieReden = (actie) => `In de aanbieding: ${actie.map((x) =>
-  `${x.naam.toLowerCase()} (${aanbiedingTekst(x.a)}, t/m ${datumNl(x.a.tot)})`).join(", ")}`;
+// Kort, voor op een kaart: [{naam, procent (goedkoper dan normaal), uitleg}], grootste voordeel eerst.
+export const actieKort = (actie, data) => actie.map((x) => ({
+  naam: x.naam.replace(/\s*\(.*?\)/g, "").toLowerCase(),
+  procent: Math.round(voordeelVan(data, x.a)),
+  uitleg: `${aanbiedingTekst(x.a)}, t/m ${datumNl(x.a.tot)}`,
+})).sort((a, b) => b.procent - a.procent);
+// Eén regel, voor de redenen bij een voorstel: "Aanbieding: tofu, aardappelen".
+export const actieReden = (actie) => `Aanbieding: ${actie.map((x) => x.naam.replace(/\s*\(.*?\)/g, "").toLowerCase()).join(", ")}`;
 
 // "Slim inslaan": wat nu in de aanbieding is, lang goed blijft (kast, vriezer) en wat je echt
 // gebruikt (vaste voorraad, of in iets wat je de laatste 60 dagen kookte). Niet wat al op de

@@ -243,7 +243,7 @@ input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 2px 
 /* aanbiedingen (AH/Jumbo, opgehaald met de knop) */
 .b-actie, .rk-actie { display: inline-block; background: var(--waarsch-zacht); color: var(--waarsch); border-radius: 4px;
   font-size: .78rem; font-weight: 600; padding: 1px 6px; white-space: nowrap; vertical-align: 1px; }
-.rk-actie { white-space: normal; font-weight: 500; }
+.rk-actie { font-weight: 500; cursor: default; }
 .b-winkel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; font-size: .88rem; }
 .b-winkelstatus small { color: var(--zacht); }
 .b-winkelknoppen { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -541,9 +541,12 @@ legend { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; co
 .suggestie .rk-titel:hover { text-decoration: underline; }
 .rk-reden { margin-top: 6px; font-size: .85rem; color: var(--zacht); }
 .rk-gauw { font-size: .85rem; color: var(--waarsch); }
-.suggestie .rk-actie { margin-top: 4px; align-self: flex-start; }
+/* aanbiedingen op een kaart: één rij kleine labels */
+.rk-acties { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.rk-actie-kop { font-size: .66rem; letter-spacing: .08em; text-transform: uppercase; color: var(--waarsch); margin-right: 2px; }
+.rk-actie.meer { background: none; border: 1px solid var(--waarsch-zacht); }
 .suggestie .knop { margin-top: auto; align-self: flex-start; }
-.suggestie .rk-reden + .knop, .suggestie .rk-gauw + .knop, .suggestie .rk-actie + .knop { margin-top: 10px; }
+.suggestie .rk-reden + .knop, .suggestie .rk-gauw + .knop, .suggestie .rk-acties + .knop { margin-top: 10px; }
 
 .log-toevoegen { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .log-toevoegen select { flex: 1 1 240px; padding: 8px 10px; font-size: inherit; }

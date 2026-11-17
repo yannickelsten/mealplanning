@@ -1,6 +1,6 @@
 import { wijzig } from "../store.js";
 import { afgeleideTags } from "../voeding.js";
-import { MOMENTEN, MOMENT_NAAM, actieReden, afvinken, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking,
+import { MOMENTEN, MOMENT_NAAM, actieKort, afvinken, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking,
   dezeWeek, gauwOp, heeftAanbiedingen, inDeAanbieding, kookVerdeling, laatstGegeten, momentVan, momentenVan, overlap,
   restenVan } from "../planning.js";
 import { dagenTot, datumNl, esc, geleden, houdbaar, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
@@ -226,7 +226,11 @@ function suggestieKaart(i, opMenu, metVoorraad) {
     ? `<span class="rk-gauw">Gebruikt ${esc(dek.gauw.map((g) => `${g.naam.toLowerCase()} (${g.open ? "open, " : ""}${houdbaar(g.datum)})`).join(", "))}</span>` : "";
   const veel = i.ov.meest && i.ov.meest[1] >= 2
     ? `<span class="rk-afwisseling">Deze week al ${i.ov.meest[1]}× ${esc(i.ov.meest[0])}</span>` : "";
-  const actie = i.actie.length ? `<span class="rk-actie">${esc(actieReden(i.actie))}</span>` : "";
+  // Aanbiedingen: kleine labels "tofu −26%" (hoeveel goedkoper dan normaal), details bij aanwijzen.
+  const kort = i.actieKort || [];
+  const actie = kort.length ? `<span class="rk-acties"><span class="rk-actie-kop">Aanbieding</span>${kort.slice(0, 3).map((x) =>
+    `<span class="rk-actie" title="${esc(x.uitleg)}">${esc(x.naam)} −${x.procent}%</span>`).join("")}${
+    kort.length > 3 ? `<span class="rk-actie meer" title="${esc(kort.slice(3).map((x) => `${x.naam} −${x.procent}%`).join(", "))}">+${kort.length - 3}</span>` : ""}</span>` : "";
   const al = opMenu.has(r.id);
   return `<div class="receptkaart suggestie">
     <a class="rk-titel" href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>
@@ -302,7 +306,8 @@ export function menu(main, data, sortering) {
     .filter((r) => f.categorie === "alle" || r.categorie === f.categorie)
     .map((r) => ({ r, laatst: laatst[r.id], bewaard: bewaard[r.id], dek: dekking(r, data),
       veg: afgeleideTags(r, data).vegetarisch, ov: overlap(r, data, week), actie: inDeAanbieding(r, data) }))
-    .filter((i) => !f.vegetarisch || i.veg);
+    .filter((i) => !f.vegetarisch || i.veg)
+    .map((i) => ({ ...i, actieKort: actieKort(i.actie, data) }));
   const metActies = heeftAanbiedingen(data);
   if (f.sortering === "aanbieding" && !metActies) f.sortering = "lang";
   const dagen = (i) => (i.laatst ? -dagenTot(i.laatst.datum) : 60);
