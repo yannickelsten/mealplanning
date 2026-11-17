@@ -776,6 +776,30 @@ const basisId = (data, id) => data.recepten[id]?.variant_van || id;
 // Met hoeveel mensen je eet (keuze in het weekplan-venster).
 export const etersPerMaaltijd = (data) => data.instellingen.planner?.eters || 1;
 
+// Kookbeurten op het menu waarvan je in vak (dag, moment) een rest kunt eten: eerder gekookt
+// (een eerdere dag, hooguit REST_DAGEN ervoor, of eerder op dezelfde dag) en nog niet afgevinkt.
+export function restKandidaten(data, dag, moment) {
+  return data.menu.gerechten.filter((g) => g.dag && !g.van && g.uit !== "voorraad" && !g.gegeten && data.recepten[g.recept]?.porties
+    && (g.dag < dag ? dagenTussen(g.dag, dag) <= REST_DAGEN : g.dag === dag && MOMENT_RANG[momentVan(g, data)] < MOMENT_RANG[moment]))
+    .sort((a, b) => a.dag.localeCompare(b.dag) || MOMENT_RANG[momentVan(a, data)] - MOMENT_RANG[momentVan(b, data)]);
+}
+
+// Een rest (n porties) van kookbeurt `kookId` in vak (dag, moment) zetten; werkt op het
+// menu-document. Wat je bij het koken zelf eet: `eten`, anders (zonder resten) n porties.
+// Zijn er niet genoeg porties, dan kook je meer. Geeft {porties, meer} of null.
+export function restErbij(doc, kookId, dag, moment, n) {
+  const k = doc.gerechten.find((x) => x.id === kookId);
+  if (!k) return null;
+  const resten = som(restenVan(doc.gerechten, k.id));
+  const nu = k.eten ?? (resten ? k.porties - resten : Math.min(n, k.porties));
+  const meer = nu + resten + n > k.porties;
+  if (meer) k.porties = nu + resten + n;
+  doc.gerechten.push({ id: nieuwId(), recept: k.recept, porties: n, dag, moment, van: k.id, ...(k.keuze ? { keuze: k.keuze } : {}) });
+  // 'eten' alleen bewaren als er iets naar de vriezer gaat (zie kookVerdeling).
+  if (nu + resten + n < k.porties) k.eten = nu; else delete k.eten;
+  return { porties: k.porties, meer };
+}
+
 // Waar de resten van een kookbeurt `g` (met dag) heen kunnen: de eerstvolgende vrije vakken
 // (geen gerecht, geen "elders") binnen REST_DAGEN dagen, bij een moment dat bij het gerecht past
 // en dat je laat invullen (weekplan-keuze, anders lunch en avondeten), niet twee keer op een dag.

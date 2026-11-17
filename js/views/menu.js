@@ -2,7 +2,7 @@ import { wijzig } from "../store.js";
 import { afgeleideTags } from "../voeding.js";
 import { MOMENTEN, MOMENT_NAAM, actieKort, afvinken, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking,
   dezeWeek, etersPerMaaltijd, gauwOp, heeftAanbiedingen, inDeAanbieding, kookVerdeling, laatstGegeten, momentVan, momentenVan,
-  overlap, restenVan, restVoorstel } from "../planning.js";
+  overlap, restErbij, restKandidaten, restenVan, restVoorstel } from "../planning.js";
 import { dagenTot, datumNl, esc, geleden, houdbaar, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
 import { gekookt } from "./gekookt.js";
 import { aantalPorties, koppelPorties, portieActie, portiesHtml } from "./porties.js";
@@ -358,8 +358,14 @@ export function menu(main, data, sortering) {
       ${past.length ? `<optgroup label="Past bij ${esc(naam.toLowerCase())}">${past.map(optie).join("")}</optgroup>` : ""}
       ${receptOpties(data, (r) => !momentenVan(r, data).includes(m))}`];
   }));
+  // Rest van wat je eerder kookt (binnen een paar dagen): bovenaan, dat is meestal wat je zoekt.
+  const restOpties = (dag, m) => {
+    const ks = restKandidaten(data, dag, m);
+    return ks.length ? `<optgroup label="Rest van wat je kookt">${ks.map((k) => `<option value="k:${esc(k.id)}">${esc(data.recepten[k.recept].titel)} (${
+      esc(weekdag(k.dag).toLowerCase())} ${esc(MOMENT_NAAM[momentVan(k, data)].toLowerCase())})</option>`).join("")}</optgroup>` : "";
+  };
   const toevoegKeuze = (dag, m) => `<select class="dag-toevoegen" data-dag="${dag}" data-moment="${m}" aria-label="${esc(MOMENT_NAAM[m])} toevoegen op ${esc(datumNl(dag))}">
-    <option value="">+ toevoegen…</option><option value="elders">Ik eet elders</option>${optiesPerMoment[m]}</select>`;
+    <option value="">+ toevoegen…</option><option value="elders">Ik eet elders</option>${restOpties(dag, m)}${optiesPerMoment[m]}</select>`;
   const rooster = `<div class="weekrooster" style="--dagen: ${zichtbaar}">
     <div class="wr-labels" aria-hidden="true"><div></div>${MOMENTEN.map(([, naam]) => `<div class="wr-label">${naam}</div>`).join("")}</div>
     ${weekDagen.map((d) => `<section class="wr-dag${d === nu ? " vandaag" : ""}">
@@ -491,6 +497,15 @@ export function menu(main, data, sortering) {
     }
     const [soort, id] = sel.value.split(":");
     if (!id) return;
+    if (soort === "k") {
+      // Een rest van een kookbeurt; zo nodig kook je meer porties.
+      let uitkomst = null;
+      const titel = data.recepten[gerechten.find((g) => g.id === id)?.recept]?.titel || "Het gerecht";
+      return wijzig("menu", (doc) => { uitkomst = restErbij(doc, id, dag, moment, etersPerMaaltijd(data)); }).then((d) => {
+        melding(uitkomst?.meer ? `Rest gepland; ${titel}: je kookt nu ${uitkomst.porties} porties` : `Rest van ${titel} gepland`);
+        herteken(d);
+      }, fout);
+    }
     const r = data.recepten[id];
     const nieuw = { id: nieuwId(), recept: id, porties: soort === "v" ? 1 : r.porties || 1,
       dag, moment, ...(soort === "v" ? { uit: "voorraad" } : {}) };
