@@ -68,7 +68,28 @@ async function render() {
   }
 }
 
-window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+// Scrollpositie per stap in de geschiedenis: met "terug" (of "vooruit") kom je weer waar je was;
+// een nieuwe pagina via een link begint bovenaan. Elke stap krijgt een id (history.state.plek);
+// bij het wisselen staat de oude pagina nog op het scherm, dus dan wordt zijn positie bewaard.
+// In sessionStorage, zodat ook herladen op dezelfde plek uitkomt (lukt dat niet: gewoon bovenaan).
+history.scrollRestoration = "manual";
+const plekken = (() => { try { return JSON.parse(sessionStorage.getItem("plekken")) || {}; } catch { return {}; } })();
+const plekId = () => {
+  if (!history.state?.plek) history.replaceState({ ...history.state, plek: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }, "");
+  return history.state.plek;
+};
+let huidig = plekId();
+const bewaarPlekken = () => { try { sessionStorage.setItem("plekken", JSON.stringify(plekken)); } catch { /* geen opslag: niet erg */ } };
+const naarPlek = () => {
+  huidig = plekId();
+  const y = plekken[huidig] || 0;
+  return render().then(() => window.scrollTo(0, y));
+};
+window.addEventListener("hashchange", () => {
+  plekken[huidig] = scrollY; // de pagina die je verlaat
+  naarPlek();
+});
+window.addEventListener("pagehide", () => { plekken[huidig] = scrollY; bewaarPlekken(); });
 // Opnieuw tekenen zonder te scrollen (na "Ongedaan maken", zie melding in util.js).
 window.addEventListener("tekenen", () => render());
 
@@ -110,5 +131,5 @@ setInterval(kijk, kijkElke);
 // Telefoon: app weer geopend (uit de achtergrond) = meteen kijken.
 document.addEventListener("visibilitychange", () => { if (!document.hidden) kijk(); });
 
-render();
+naarPlek();
 kijk();
