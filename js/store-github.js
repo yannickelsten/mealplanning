@@ -19,7 +19,7 @@ const TAK = "main";
 const AUTEUR = { name: "Mealplanning", email: "mealplanning@users.noreply.github.com" };
 const SLEUTEL = "mealplanning-github";
 const DATAPAD = /^data\/(recepten\/[^/]+\/)?[^/]+\.json$/;
-const VAST = ["ingredienten", "eenheden", "categorieen", "bewaren"];
+const VAST = ["ingredienten", "eenheden", "categorieen", "bewaren", "aanbiedingen"];
 // Dezelfde lege beginstand als PLANBESTANDEN in tools/mealdata.py.
 const PLAN = {
   logboek: () => ({ maaltijden: [], gekookt: [], weggegooid: [], opgemaakt: [] }),
@@ -206,6 +206,8 @@ function bouw(st) {
   for (const naam of Object.keys(PLAN)) {
     if (!(naam in data)) { data[naam] = PLAN[naam](); data.versies[naam] = ""; }
   }
+  // Aanbiedingen haalt de laptop op (knop); hier alleen lezen. Geen bestand = geen aanbiedingen.
+  if (!Array.isArray(data.aanbiedingen?.aanbiedingen)) data.aanbiedingen = { aanbiedingen: [] };
   return data;
 }
 
@@ -366,6 +368,10 @@ export async function bewaarRecept() {
 
 export async function verwijderRecept() {
   throw new Error("Recepten verwijderen kan alleen op de laptop.");
+}
+
+export async function taak() {
+  throw new Error("Prijzen en aanbiedingen ophalen kan alleen op de laptop.");
 }
 
 // ---- melding bovenaan: geen bereik / wijzigingen wachten ----

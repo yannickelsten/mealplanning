@@ -108,6 +108,26 @@ async function verstuur(naam, aanpassing) {
   throw new Error("Opslaan mislukt, het bestand werd steeds tegelijk gewijzigd. Probeer het opnieuw.");
 }
 
+// Een klus op de server starten en volgen: "prijzen" (gewone prijzen van Jumbo bijwerken) of
+// "aanbiedingen" (AH + Jumbo ophalen). Alleen als je op de knop drukt. `voortgang(status)` krijgt
+// tussendoor {voortgang: 0..1, tekst}. Geeft de uitkomst; een fout wordt een Error.
+export async function taak(naam, voortgang = () => {}) {
+  const vraag = (opties) => fetch(`/api/taak/${naam}`, opties).then(async (r) => {
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.fout || `Fout ${r.status}`);
+    return body;
+  });
+  let st = await vraag({ method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  while (st.bezig) {
+    voortgang(st);
+    await new Promise((ok) => setTimeout(ok, 1000));
+    st = await vraag().catch(() => st); // even geen antwoord: gewoon nog eens vragen
+  }
+  if (st.fout) throw new Error(st.fout);
+  cache = null;
+  return st.uitkomst;
+}
+
 // Koppeling met GitHub (voor de telefoon). De server bewaart de sleutel buiten OneDrive en
 // geeft hem nooit terug.
 export async function koppeling() {

@@ -1,7 +1,8 @@
 import { wijzig } from "../store.js";
 import { afgeleideTags } from "../voeding.js";
-import { MOMENTEN, MOMENT_NAAM, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking, dezeWeek,
-  gauwOp, kookVerdeling, laatstGegeten, momentVan, momentenVan, overlap, restenVan } from "../planning.js";
+import { MOMENTEN, MOMENT_NAAM, actieReden, bewaardPerGerecht, bewaardePorties, boodschappenlijst, dagwaarde, dekking,
+  dezeWeek, gauwOp, heeftAanbiedingen, inDeAanbieding, kookVerdeling, laatstGegeten, momentVan, momentenVan, overlap,
+  restenVan } from "../planning.js";
 import { dagenTot, datumNl, esc, geleden, houdbaar, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
 import { gekookt } from "./gekookt.js";
 import { aantalPorties, koppelPorties, portieActie, portiesHtml } from "./porties.js";
@@ -201,11 +202,12 @@ function suggestieKaart(i, opMenu, metVoorraad) {
     ? `<span class="rk-gauw">Gebruikt ${esc(dek.gauw.map((g) => `${g.naam.toLowerCase()} (${g.open ? "open, " : ""}${houdbaar(g.datum)})`).join(", "))}</span>` : "";
   const veel = i.ov.meest && i.ov.meest[1] >= 2
     ? `<span class="rk-afwisseling">Deze week al ${i.ov.meest[1]}× ${esc(i.ov.meest[0])}</span>` : "";
+  const actie = i.actie.length ? `<span class="rk-actie">${esc(actieReden(i.actie))}</span>` : "";
   const al = opMenu.has(r.id);
   return `<div class="receptkaart suggestie">
     <a class="rk-titel" href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>
     ${r.ondertitel ? `<span class="rk-onder">${esc(r.ondertitel)}</span>` : ""}
-    <span class="rk-reden">${redenen.map(esc).join(" · ")}</span>${gauw}${veel}
+    <span class="rk-reden">${redenen.map(esc).join(" · ")}</span>${gauw}${actie}${veel}
     <button class="knop klein" data-plan="${esc(r.id)}" ${al ? "disabled" : ""}>${al ? "✓ Op het menu" : "+ Op het menu"}</button>
   </div>`;
 }
@@ -272,8 +274,10 @@ export function menu(main, data, sortering) {
   let items = kandidaten
     .filter((r) => f.categorie === "alle" || r.categorie === f.categorie)
     .map((r) => ({ r, laatst: laatst[r.id], bewaard: bewaard[r.id], dek: dekking(r, data),
-      veg: afgeleideTags(r, data).vegetarisch, ov: overlap(r, data, week) }))
+      veg: afgeleideTags(r, data).vegetarisch, ov: overlap(r, data, week), actie: inDeAanbieding(r, data) }))
     .filter((i) => !f.vegetarisch || i.veg);
+  const metActies = heeftAanbiedingen(data);
+  if (f.sortering === "aanbieding" && !metActies) f.sortering = "lang";
   const dagen = (i) => (i.laatst ? -dagenTot(i.laatst.datum) : 60);
   // Afwisseling: wat qua soort gerecht, keuken of eiwit al vaak voorkomt deze week, zakt.
   const score = (i) => Math.min(dagen(i), 60) - 8 * i.ov.score;
@@ -283,6 +287,10 @@ export function menu(main, data, sortering) {
   if (f.sortering === "voorraad") {
     items.sort((a, b) => alKlaar(a, b) || b.dek.gauw.length - a.dek.gauw.length
       || a.dek.ontbreekt.length - b.dek.ontbreekt.length || score(b) - score(a) || schud(a, b));
+  } else if (f.sortering === "aanbieding") {
+    // Wat deze week (tot 6 dagen vooruit) in de aanbieding is bij AH of Jumbo.
+    items = items.filter((i) => i.actie.length);
+    items.sort((a, b) => alKlaar(a, b) || b.actie.length - a.actie.length || score(b) - score(a) || schud(a, b));
   } else if (f.sortering === "favorieten") {
     // Wat je vaker hebt gegeten, en al even niet: "kook nog eens".
     items = items.filter((i) => i.laatst?.aantal >= 2 && dagen(i) >= 7);
@@ -329,6 +337,7 @@ export function menu(main, data, sortering) {
           <button class="chip${f.sortering === "lang" ? " aan" : ""}" data-sort="lang">Lang niet gegeten</button>
           <button class="chip${f.sortering === "voorraad" ? " aan" : ""}" data-sort="voorraad">Met wat ik in huis heb</button>
           <button class="chip${f.sortering === "favorieten" ? " aan" : ""}" data-sort="favorieten">Favorieten</button>
+          ${metActies ? `<button class="chip${f.sortering === "aanbieding" ? " aan" : ""}" data-sort="aanbieding">In de aanbieding</button>` : ""}
         </div>
         <div class="chipgroep">
           <button class="chip${f.categorie === "alle" ? " aan" : ""}" data-cat="alle">Alle</button>
@@ -345,6 +354,7 @@ export function menu(main, data, sortering) {
         ${items.length > f.aantal ? `<p><button class="chip leeg" data-meer>Meer suggesties</button></p>` : ""}`
         : `<p class="leeg-tekst">${f.sortering === "favorieten"
           ? "Nog geen favorieten: gerechten die je vaker eet (en al even niet hebt gehad) komen hier vanzelf."
+          : f.sortering === "aanbieding" ? "Geen gerechten met ingrediënten die deze week in de aanbieding zijn."
           : "Geen recepten met deze keuzes."}</p>`}
     </section>`;
 

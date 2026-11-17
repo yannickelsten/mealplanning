@@ -6,7 +6,7 @@
 // Zonder hoeveelheid betekent "in huis, genoeg" (zout, kruiden…).
 
 import { afgeleideTags, gram, regels, rekenIng, voeding } from "./voeding.js";
-import { breuk, dagenTot, geleden, hoeveelheid, houdbaar, nieuwId, nl, plusDagen, vandaag } from "./util.js";
+import { breuk, dagenTot, datumNl, geleden, hoeveelheid, houdbaar, nieuwId, nl, plusDagen, vandaag } from "./util.js";
 
 export const PLEKKEN = [["koelkast", "Koelkast"], ["vriezer", "Vriezer"], ["kast", "Voorraadkast"]];
 const GAUW = 3; // dagen: "gauw opmaken"
@@ -773,7 +773,7 @@ function kookInKopie(kopie, g) {
 }
 
 // Waarom dit gerecht: korte zinnen voor op het voorstel.
-function redenenVoor(r, laatst, dek, metVoorraad, dag) {
+function redenenVoor(r, laatst, dek, metVoorraad, dag, actie = []) {
   const uit = [laatst ? `Laatst gegeten ${geleden(laatst.datum)}` : "Nog niet gegeten"];
   const gauw = dek.gauw.filter((x) => dag <= x.datum);
   if (gauw.length) uit.push(`Gebruikt ${gauw.map((x) => `${x.naam.toLowerCase()} (${x.open ? "open, " : ""}${houdbaar(x.datum)})`).join(", ")}`);
@@ -781,7 +781,74 @@ function redenenVoor(r, laatst, dek, metVoorraad, dag) {
     const n = dek.ontbreekt.length;
     uit.push(!n ? "Alles in huis" : n <= 3 ? `Nog kopen: ${dek.ontbreekt.join(", ").toLowerCase()}` : `Nog ${n} van ${dek.totaal} ingrediënten kopen`);
   }
+  if (actie.length) uit.push(actieReden(actie));
   return uit;
+}
+
+// ---- Aanbiedingen ----
+// data/aanbiedingen.json: wat er bij AH en Jumbo in de aanbieding is voor gekoppelde producten.
+// Alleen opgehaald als je op de knop drukt (Boodschappen, laptop). Geen bestand = geen
+// aanbiedingen, en dan werkt alles gewoon zoals zonder. Elke aanbieding geldt van `vanaf` t/m `tot`.
+export const WINKEL_NAAM = { jumbo: "Jumbo", ah: "AH" };
+const alleAanbiedingen = (data) => data.aanbiedingen?.aanbiedingen || [];
+export const heeftAanbiedingen = (data) => alleAanbiedingen(data).some((a) => a.tot >= vandaag());
+export const kortingVan = (a) => a.korting ?? (a.van > a.prijs ? (1 - a.prijs / a.van) * 100 : 0);
+export const aanbiedingTekst = (a) => `${WINKEL_NAAM[a.winkel] || a.winkel}: ${a.actie}`;
+
+// Aanbiedingen voor een soort die ergens tussen `van` en `tot` gelden, grootste korting eerst.
+export function aanbiedingenVan(data, slug, van = vandaag(), tot = van) {
+  return alleAanbiedingen(data)
+    .filter((a) => data.ingredienten[a.ingredient] && soortVan(data, a.ingredient) === slug && a.vanaf <= tot && a.tot >= van)
+    .sort((a, b) => kortingVan(b) - kortingVan(a));
+}
+
+// De ingrediënten van een recept die ertoe doen (geen zout en kruiden): [{slug, naam}].
+function soortenVan(r, data, cache) {
+  if (cache?.has(r.id)) return cache.get(r.id);
+  const uit = [...benodigd([{ recept: r.id }], data).values()]
+    .filter((x) => !x.ing.verwaarloosbaar).map((x) => ({ slug: x.slug, naam: x.ing.naam }));
+  cache?.set(r.id, uit);
+  return uit;
+}
+
+// Wat er van een recept in de aanbieding is als je tussen vandaag en `dag` boodschappen doet:
+// [{naam, a}]. `cache` (een Map) scheelt rekenwerk als je dit voor veel vakken vraagt.
+export function inDeAanbieding(r, data, dag = plusDagen(vandaag(), 6), cache = null) {
+  if (!heeftAanbiedingen(data)) return [];
+  // Een paar procent korting is geen reden om iets te gaan koken: pas vanaf 10%.
+  return soortenVan(r, data, cache)
+    .map(({ slug, naam }) => ({ naam, a: aanbiedingenVan(data, slug, vandaag(), dag)[0] }))
+    .filter((x) => x.a && kortingVan(x.a) >= 10);
+}
+
+export const actieReden = (actie) => `In de aanbieding: ${actie.map((x) =>
+  `${x.naam.toLowerCase()} (${aanbiedingTekst(x.a)}, t/m ${datumNl(x.a.tot)})`).join(", ")}`;
+
+// "Slim inslaan": wat nu in de aanbieding is, lang goed blijft (kast, vriezer) en wat je echt
+// gebruikt (vaste voorraad, of in iets wat je de laatste 60 dagen kookte). Niet wat al op de
+// lijst staat (daar staat de aanbieding al bij). Hooguit 3, grootste korting eerst.
+export function koopAdvies(data, lijst) {
+  if (!heeftAanbiedingen(data)) return [];
+  const opLijst = new Set(lijst.filter((x) => x.status === "kopen").map((x) => x.slug));
+  const gebruikt = new Set(Object.keys(data.instellingen.minimum || {}).map((s) => soortVan(data, s)));
+  const grens = plusDagen(vandaag(), -60);
+  const gezien = new Set();
+  for (const k of data.logboek.gekookt || []) {
+    if (k.datum < grens || gezien.has(k.recept) || !data.recepten[k.recept]) continue;
+    gezien.add(k.recept);
+    for (const s of soortenVan(data.recepten[k.recept], data)) gebruikt.add(s.slug);
+  }
+  const uit = [];
+  for (const slug of gebruikt) {
+    const ing = ingVan(data, slug);
+    if (!ing || opLijst.has(slug)) continue;
+    const b = bewaren(ing, data);
+    if (!(b.plek === "vriezer" || b.dagen >= 30)) continue;
+    // Ook wat over een paar dagen begint (Jumbo wisselt op woensdag, AH op maandag).
+    const a = aanbiedingenVan(data, slug, vandaag(), plusDagen(vandaag(), 3))[0];
+    if (a && kortingVan(a) >= 15) uit.push({ slug, ing, a });
+  }
+  return uit.sort((x, y) => kortingVan(y.a) - kortingVan(x.a)).slice(0, 3);
 }
 
 // Stelt een menu voor de komende dagen voor. Niets wordt opgeslagen.
@@ -866,6 +933,7 @@ export function stelPlanVoor(data, opties = {}) {
   const laatst = laatstGegeten(data);
   const metVoorraad = data.voorraad.ingredienten.length > 0;
   const ruis = ronde ? 15 : 3; // bij "opnieuw voorstellen" mag het meer verschillen
+  const soorten = new Map(); // ingrediënten per recept, voor de aanbiedingen
   for (const vak of vakken) {
     if (!vrij(vak.dag, vak.moment)) continue;
     const week = dezeWeek(kopie);
@@ -877,15 +945,18 @@ export function stelPlanVoor(data, opties = {}) {
       let score = Math.min(l ? -dagenTot(l.datum) : 60, 60) - 8 * overlap(r, kopie, week).score;
       score += 12 * dek.gauw.filter((x) => vak.dag <= x.datum).length;
       if (metVoorraad && dek.totaal) score += dek.ontbreekt.length ? -2 * dek.ontbreekt.length : 6;
+      // In de aanbieding: een duwtje, niet meer dan wat gauw op moet of afwisseling.
+      const actie = inDeAanbieding(r, data, vak.dag, soorten);
+      score += Math.min(12, 6 * actie.length);
       score += (dagwaarde(`${r.id}|${ronde}|${vak.dag}|${vak.moment}`) % 1000) / 1000 * ruis;
-      if (!beste || score > beste.score) beste = { r, score, l, dek };
+      if (!beste || score > beste.score) beste = { r, score, l, dek, actie };
     }
     if (!beste) continue;
     const { r } = beste;
     const porties = r.porties * Math.max(1, Math.ceil(eters / r.porties));
     const keuze = r.keuzes?.opties?.[0]?.id;
     const kook = { tid: tid(), recept: r.id, porties, eten: Math.min(eters, porties), dag: vak.dag, moment: vak.moment,
-      ...(keuze ? { keuze } : {}), redenen: redenenVoor(r, beste.l, beste.dek, metVoorraad, vak.dag) };
+      ...(keuze ? { keuze } : {}), redenen: redenenVoor(r, beste.l, beste.dek, metVoorraad, vak.dag, beste.actie) };
     neem(kook);
     kopie.menu.gerechten.push({ ...kook, id: kook.tid });
     kookInKopie(kopie, kook);

@@ -1,10 +1,19 @@
-import { wijzig } from "../store.js";
-import { boodschappenlijst, inVerpakkingen, inVoorraad, prijsVan, rond, sleutelExtra, soortVan, standaardPlek, teKoken,
-  toonHoeveelheid, toonPartijen, verpakkingVan, voorraadEenheden } from "../planning.js";
+import { laad, taak, wijzig } from "../store.js";
+import { aanbiedingenVan, aanbiedingTekst, boodschappenlijst, heeftAanbiedingen, inVerpakkingen, inVoorraad, koopAdvies,
+  prijsVan, rond, sleutelExtra, soortVan, standaardPlek, teKoken, toonHoeveelheid, toonPartijen, verpakkingVan,
+  voorraadEenheden } from "../planning.js";
 import { breuk, datumNl, esc, euro, groepNaam, melding, nieuwId, nl, vandaag } from "../util.js";
 import { ingredientKeuzelijst, vindIngredient } from "./voorraad.js";
 
 const fout = (err) => melding(err.message);
+// Uitkomst van de laatste keer "Prijzen bijwerken" (blijft staan tot je de pagina verlaat).
+let prijsVerslag = null;
+let bezigMet = null; // "prijzen" | "aanbiedingen" terwijl een knop bezig is
+
+// "Jumbo Tofu Naturel 375g: €1,00 i.p.v. €1,40, wo 18 nov t/m di 24 nov"
+const actieDetail = (a) => `${a.product}${a.hoeveelheid && !a.product.includes(a.hoeveelheid) ? ` (${a.hoeveelheid})` : ""}: ${euro(a.prijs)}${
+  a.van ? ` i.p.v. ${euro(a.van)}` : ""}, ${a.vanaf > vandaag() ? `vanaf ${datumNl(a.vanaf)} ` : ""}t/m ${datumNl(a.tot)}`;
+const actieHtml = (a) => (a ? ` <span class="b-actie" title="${esc(actieDetail(a))}">${esc(aanbiedingTekst(a))}</span>` : "");
 
 // Ongeveer de looproute door de supermarkt; onbekende groepen komen daarna.
 const ROUTE = ["fruit-en-groente", "brood", "vlees-en-vleesvervangers", "zuivel-en-kaas", "pasta-en-rijst",
@@ -42,24 +51,35 @@ export function boodschappen(main, data) {
         x.bijnaOp != null && `naar schatting ±${nl(Math.min(100, Math.round(x.bijnaOp * 10) * 10))}% gebruikt`,
         x.opgemaakt && `op sinds ${datumNl(x.opgemaakt)}`,
       ].filter(Boolean).join(" · ");
+      // In de aanbieding ergens tussen nu en wanneer je het nodig hebt.
+      const actie = aanbiedingenVan(data, x.slug, vandaag(), x.dag > vandaag() ? x.dag : vandaag())[0];
       return {
         sleutel: x.sleutel, slug: x.slug, ing: x.ing, naam: x.ing.naam, groep: x.ing.groep, gekocht, standaard,
-        later: x.later, prijs: prijsVan(gekocht, x.ing, e), bijnaOp: x.bijnaOp != null, alleenOp,
+        later: x.later, prijs: prijsVan(gekocht, x.ing, e), bijnaOp: x.bijnaOp != null, alleenOp, actie,
         hv: x.bijnaOp != null ? "bijna op?" : alleenOp ? (pak ? toonHoeveelheid([pak], e) : "is op")
           : pak ? `${toonHoeveelheid([pak], e)} (${toonHoeveelheid(x.rest, e, x.ing)} nodig)` : toonHoeveelheid(x.rest, e, x.ing),
         detail: waarom
           + (x.later ? ` · nodig op ${datumNl(x.dag)}, koop vanaf ${datumNl(x.later)}` : "")
-          + (x.partijen.length && x.bijnaOp == null ? ` · in huis: ${toonPartijen(x.partijen, data)}` : ""),
+          + (x.partijen.length && x.bijnaOp == null ? ` · in huis: ${toonPartijen(x.partijen, data)}` : "")
+          + (actie ? ` · aanbieding ${actieDetail(actie)}` : ""),
       };
     }),
     ...data.boodschappen.extra.map((x) => {
       const ing = data.ingredienten[x.ingredient];
       const gekocht = aangepast(sleutelExtra(x.id)) || [];
+      const actie = ing ? aanbiedingenVan(data, soortVan(data, x.ingredient))[0] : null;
       return { sleutel: sleutelExtra(x.id), extraId: x.id, slug: ing ? x.ingredient : null, ing,
-        naam: x.naam, groep: ing?.groep || ZONDER_GROEP, gekocht, standaard: [], hv: "", detail: "",
+        naam: x.naam, groep: ing?.groep || ZONDER_GROEP, gekocht, standaard: [], hv: "", actie,
+        detail: actie ? `aanbieding ${actieDetail(actie)}` : "",
         prijs: ing ? prijsVan(gekocht, ing, e) : null };
     }),
   ];
+  // Slim inslaan: in de aanbieding, blijft lang goed, gebruik je vaak. Niet wat al op de lijst staat.
+  const extraSoorten = new Set(data.boodschappen.extra.filter((x) => x.ingredient).map((x) => soortVan(data, x.ingredient)));
+  const inslaan = koopAdvies(data, lijst).filter((x) => !extraSoorten.has(x.slug));
+  // De knoppen alleen als er producten gekoppeld zijn (anders doen ze niets).
+  const gekoppeld = Object.values(data.ingredienten).filter((i) => i.winkel);
+  const opgehaald = data.aanbiedingen?.opgehaald;
   const inHuis = lijst.filter((x) => x.status !== "kopen");
   // Nu kopen, en verse dingen die pas later in de week nodig zijn apart.
   const nu = rijen.filter((r) => !r.later);
@@ -91,7 +111,7 @@ export function boodschappen(main, data) {
 
   const rijHtml = (r) => `<li class="b-item${af.has(r.sleutel) ? " af" : ""}" data-sleutel="${esc(r.sleutel)}">
     <label class="b-vink"><input type="checkbox" ${af.has(r.sleutel) ? "checked" : ""}>
-      <span class="b-naam">${esc(r.naam)}</span>${r.hv ? ` <span class="b-hv">${esc(r.hv)}</span>` : ""}</label>
+      <span class="b-naam">${esc(r.naam)}</span>${r.hv ? ` <span class="b-hv">${esc(r.hv)}</span>` : ""}${actieHtml(r.actie)}</label>
     ${r.prijs != null ? `<span class="b-prijs">±${esc(euro(r.prijs))}</span>` : ""}
     ${r.detail ? `<small class="b-detail">${esc(r.detail)}</small>` : ""}
     ${af.has(r.sleutel) && r.ing ? aantalHtml(r) : ""}
@@ -112,6 +132,24 @@ export function boodschappen(main, data) {
     ${onderdelen.size ? `<p class="hint">Al gemaakt, uit de koelkast/vriezer: ${[...onderdelen].map(([id, keer]) =>
       `${esc(data.recepten[id]?.titel || id)} (${breuk(keer)}×)`).join(", ")}. Daarvoor hoef je niets te kopen.</p>` : ""}
     ${metPrijs.length ? `<p class="b-totaal">Geschat: <b>±${esc(euro(totaal))}</b>${zonderPrijs ? ` <small>(+ ${zonderPrijs} zonder prijs)</small>` : ""}</p>` : ""}
+    ${gekoppeld.length ? `<div class="b-winkel">
+      <span class="b-winkelstatus">${heeftAanbiedingen(data)
+        ? `Aanbiedingen van AH en Jumbo, opgehaald ${esc(datumNl(opgehaald))}`
+        : opgehaald ? `De aanbiedingen van ${esc(datumNl(opgehaald))} zijn verlopen` : "Nog geen aanbiedingen opgehaald"}
+        <small>(via <a href="https://www.prijsprofeet.nl" target="_blank" rel="noopener">PrijsProfeet</a>; controleer de prijs in de winkel)</small></span>
+      <span class="alleen-laptop b-winkelknoppen">
+        <button class="knop klein" data-taak="aanbiedingen" ${bezigMet ? "disabled" : ""}>${bezigMet === "aanbiedingen" ? "Bezig…" : "Aanbiedingen ophalen"}</button>
+        ${gekoppeld.some((i) => i.winkel.jumbo) ? `<button class="knop klein" data-taak="prijzen" ${bezigMet ? "disabled" : ""}
+          title="Haalt de gewone prijzen van Jumbo op voor alle gekoppelde ingrediënten">${bezigMet === "prijzen" ? "Bezig…" : "Prijzen bijwerken (Jumbo)"}</button>` : ""}
+        <span class="b-taakstatus" aria-live="polite"></span>
+      </span>
+    </div>` : ""}
+    ${prijsVerslag ? `<details class="b-verslag" open><summary>${esc(prijsVerslag.kop)}</summary>${prijsVerslag.html}</details>` : ""}
+    ${inslaan.length ? `<section class="categorie b-slim"><h2>Slim inslaan <small>in de aanbieding en lang houdbaar</small></h2>
+      <ul class="blijst">${inslaan.map((x) => `<li class="b-item" data-slug="${esc(x.slug)}">
+        <span class="b-naam">${esc(x.ing.naam)}</span>${actieHtml(x.a)}
+        <small class="b-detail">${esc(actieDetail(x.a))}</small>
+        <span class="b-acties"><button class="knop klein" data-inslaan>+ Op de lijst</button></span></li>`).join("")}</ul></section>` : ""}
     <form class="b-toevoegen" autocomplete="off">
       <input name="naam" list="b-ingredienten" placeholder="Zelf iets toevoegen, bv. melk of wc-papier" aria-label="Zelf iets toevoegen">
       ${ingredientKeuzelijst(data, "b-ingredienten")}
@@ -130,6 +168,40 @@ export function boodschappen(main, data) {
           ? `: ${esc(toonPartijen(x.partijen.filter((p) => p.hoeveelheid != null), data))}` : ""}${x.status === "onzeker" ? " (genoeg?)" : ""}</small>
       </li>`).join("")}</ul>
       <p class="hint">Klopt iets niet? Pas het aan bij <a href="#/voorraad">Voorraad</a>.</p></details>` : ""}`;
+
+  // Prijzen bijwerken / aanbiedingen ophalen: alleen als je op de knop drukt.
+  main.querySelectorAll("[data-taak]").forEach((b) => b.addEventListener("click", async () => {
+    const naam = b.dataset.taak;
+    const status = main.querySelector(".b-taakstatus");
+    bezigMet = naam;
+    main.querySelectorAll("[data-taak]").forEach((k) => { k.disabled = true; });
+    b.textContent = "Bezig…";
+    try {
+      const u = await taak(naam, (st) => { status.textContent = `${Math.round(st.voortgang * 100)}% · ${st.tekst}`; });
+      if (naam === "prijzen") {
+        const lijst = (xs, f) => (xs.length ? `<ul>${xs.map((x) => `<li>${esc(f(x))}</li>`).join("")}</ul>` : "");
+        prijsVerslag = {
+          kop: `${u.bijgewerkt} prijzen bijgewerkt, ${u.veranderd.length} veranderd${u.verdacht.length ? `, ${u.verdacht.length} om te controleren` : ""}`,
+          html: lijst(u.veranderd, (x) => `${x.naam}: ${x.oud == null ? "nog geen prijs" : euro(x.oud)} → ${euro(x.nieuw)} per kg`)
+            + (u.verdacht.length ? `<p>Niet overgenomen (heel andere prijs, misschien een ander product):</p>${lijst(u.verdacht, (x) => x)}` : "")
+            + (u.niet_gevonden.length ? `<p>Niet meer gevonden bij Jumbo (prijs blijft zoals hij was):</p>${lijst(u.niet_gevonden, (x) => x)}` : ""),
+        };
+      } else {
+        melding(u.aantal ? `${u.aantal} aanbiedingen gevonden voor ${u.ingredienten} van je ingrediënten` : "Geen aanbiedingen voor je ingrediënten deze week");
+      }
+    } catch (err) {
+      melding(err.message);
+    }
+    bezigMet = null;
+    laad(true).then(herteken, fout);
+  }));
+
+  // Slim inslaan: als extra op de lijst.
+  main.querySelectorAll("[data-inslaan]").forEach((b) => b.addEventListener("click", () => {
+    const slug = b.closest("li").dataset.slug;
+    const item = { id: nieuwId(), naam: data.ingredienten[slug].naam, ingredient: slug };
+    wijzig("boodschappen", (doc) => { doc.extra.push(item); }).then(herteken, fout);
+  }));
 
   // Afvinken
   const huidige = new Set(rijen.map((r) => r.sleutel));

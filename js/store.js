@@ -18,5 +18,6 @@ export const verwijderRecept = (...a) => S.verwijderRecept(...a);
 export const koppeling = (...a) => S.koppeling(...a);
 export const koppel = (...a) => S.koppel(...a);
 export const ontkoppel = (...a) => S.ontkoppel(...a);
+export const taak = (...a) => S.taak(...a); // prijzen/aanbiedingen ophalen (alleen laptop, op verzoek)
 // Moment van de laatste eigen wijziging (ms), zie main.js.
 export const laatsteEigenWijziging = () => S.laatsteEigenWijziging;

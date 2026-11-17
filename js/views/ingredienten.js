@@ -1,6 +1,6 @@
 import { bewaarIngredient, laad } from "../store.js";
 import { rekenIng, VOEDING_KEYS } from "../voeding.js";
-import { esc, groepNaam, melding, nl, slugVan } from "../util.js";
+import { datumNl, esc, groepNaam, melding, nl, slugVan } from "../util.js";
 
 const ROLLEN = ["eiwitbron", "peulvrucht", "groente", "fruit", "koolhydraat", "zuivel",
   "smaakmaker", "kruid", "vet", "snack", "overig"];
@@ -96,6 +96,22 @@ const veld = (label, html, hint = "") =>
   `<label class="veld"><span>${label}</span>${html}${hint ? `<small>${hint}</small>` : ""}</label>`;
 const waarde = (v) => (v == null ? "" : esc(v));
 
+// Gekoppelde winkelproducten (tools/prijzen.py): de eerste Jumbo-link geeft de prijs bij
+// "Prijzen bijwerken", de rest telt mee voor aanbiedingen. Koppelen gaat via Claude.
+const WINKEL_URL = { jumbo: "https://www.jumbo.com/producten/", ah: "https://www.ah.nl/producten/product/" };
+function winkelHtml(ing) {
+  const w = ing.winkel;
+  if (!w) return "";
+  const link = (winkel, l, tekst) => `<a href="${esc(WINKEL_URL[winkel] + l)}" target="_blank" rel="noopener">${esc(tekst)}</a>`;
+  const deel = (winkel, naam) => (w[winkel]?.length ? `${naam}: ${link(winkel, w[winkel][0], "product")}${
+    w[winkel].length > 1 ? ` + ${w[winkel].slice(1).map((l, i) => link(winkel, l, String(i + 2))).join(", ")}` : ""}` : "");
+  return `<p class="hint">Gekoppeld aan ${[deel("jumbo", "Jumbo"), deel("ah", "AH")].filter(Boolean).join(" · ")}.
+      ${w.jumbo ? `De prijs komt van het eerste Jumbo-product${ing.prijs_datum && !ing.prijs_handmatig ? ` (bijgewerkt ${esc(datumNl(ing.prijs_datum))})` : ""}.` : ""}
+      Aanbiedingen van deze producten zie je bij Boodschappen.</p>
+    ${w.jumbo ? `<label class="vink"><input type="checkbox" name="prijs_handmatig" ${ing.prijs_handmatig ? "checked" : ""}> prijs zelf bijhouden
+      ("Prijzen bijwerken" laat deze prijs dan staan)</label>` : ""}`;
+}
+
 export function ingredientForm(main, data, slug) {
   const nieuw = slug === "nieuw";
   const ing = nieuw ? { rol: "overig", groep: "", per_100g: null, prijs_per_kg: null } : data.ingredienten[slug];
@@ -162,6 +178,7 @@ export function ingredientForm(main, data, slug) {
           ${veld("Gram per stuk", `<input name="stuk" type="number" step="any" min="0" value="${waarde(ing.gram_per?.stuk)}">`, "bv. 1 ui = 100")}
           ${veld("Dichtheid (g/ml)", `<input name="dichtheid" type="number" step="any" min="0" value="${waarde(ing.dichtheid)}">`, "alleen als niet ±1, bv. olie 0,92")}
         </div>
+        ${winkelHtml(ing)}
       </fieldset>
       <fieldset><legend>Verpakking en bewaren</legend>
         <div class="vier">
@@ -208,6 +225,8 @@ export function ingredientForm(main, data, slug) {
   };
   for (const v of ["verpakking", "verpakking_g", "stuk"]) form[v].addEventListener("input", stuksTonen);
   stuksTonen();
+  // Zelf een andere prijs getypt bij een gekoppeld product: die niet meer overschrijven.
+  if (form.prijs_handmatig) form.prijs_per_kg.addEventListener("input", () => { form.prijs_handmatig.checked = true; });
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -229,6 +248,9 @@ export function ingredientForm(main, data, slug) {
     if (form.soort) { if (form.soort.value) uit.soort = form.soort.value; else delete uit.soort; }
     if (form.standaard) { if (form.standaard.value) uit.standaard = form.standaard.value; else delete uit.standaard; }
     uit.prijs_per_kg = getal("prijs_per_kg");
+    if (form.prijs_handmatig) {
+      if (form.prijs_handmatig.checked) { uit.prijs_handmatig = true; delete uit.prijs_datum; } else delete uit.prijs_handmatig;
+    }
     const gp = { ...(ing.gram_per || {}) };
     if (getal("stuk") != null) gp.stuk = getal("stuk"); else delete gp.stuk;
     for (const x of verpakkingen) delete gp[x];
