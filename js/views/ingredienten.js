@@ -1,6 +1,6 @@
 import { bewaarIngredient, laad } from "../store.js";
 import { rekenIng, VOEDING_KEYS } from "../voeding.js";
-import { datumNl, esc, groepNaam, melding, nl, slugVan } from "../util.js";
+import { datumNl, esc, euro, groepNaam, melding, nl, slugVan } from "../util.js";
 
 const ROLLEN = ["eiwitbron", "peulvrucht", "groente", "fruit", "koolhydraat", "zuivel",
   "smaakmaker", "kruid", "vet", "snack", "overig"];
@@ -96,21 +96,31 @@ const veld = (label, html, hint = "") =>
   `<label class="veld"><span>${label}</span>${html}${hint ? `<small>${hint}</small>` : ""}</label>`;
 const waarde = (v) => (v == null ? "" : esc(v));
 
-// Gekoppelde winkelproducten (tools/prijzen.py): de eerste Jumbo-link geeft de prijs bij
-// "Prijzen bijwerken", de rest telt mee voor aanbiedingen. Koppelen gaat via Claude.
+// Winkelproducten (tools/prijzen.py) staan als webadres bij een ingrediënt: "product" = het
+// Jumbo-product dat je normaal koopt (geeft de prijs), "alternatieven" = andere producten die
+// meetellen voor aanbiedingen (alleen bij de algemene naam, niet bij een variant).
 const WINKEL_URL = { jumbo: "https://www.jumbo.com/producten/", ah: "https://www.ah.nl/producten/product/" };
-function winkelHtml(ing) {
-  const w = ing.winkel;
-  if (!w) return "";
-  const link = (winkel, l, tekst) => `<a href="${esc(WINKEL_URL[winkel] + l)}" target="_blank" rel="noopener">${esc(tekst)}</a>`;
-  const deel = (winkel, naam) => (w[winkel]?.length ? `${naam}: ${link(winkel, w[winkel][0], "product")}${
-    w[winkel].length > 1 ? ` + ${w[winkel].slice(1).map((l, i) => link(winkel, l, String(i + 2))).join(", ")}` : ""}` : "");
-  return `<p class="hint">Gekoppeld aan ${[deel("jumbo", "Jumbo"), deel("ah", "AH")].filter(Boolean).join(" · ")}.
-      ${w.jumbo ? `De prijs komt van het eerste Jumbo-product${ing.prijs_datum && !ing.prijs_handmatig ? ` (bijgewerkt ${esc(datumNl(ing.prijs_datum))})` : ""}.` : ""}
-      Aanbiedingen van deze producten zie je bij Boodschappen.</p>
-    ${w.jumbo ? `<label class="vink"><input type="checkbox" name="prijs_handmatig" ${ing.prijs_handmatig ? "checked" : ""}> prijs zelf bijhouden
-      ("Prijzen bijwerken" laat deze prijs dan staan)</label>` : ""}`;
+const WINKEL = { jumbo: "Jumbo", ah: "AH" };
+const winkelVan = (url) => Object.keys(WINKEL_URL).find((w) => url?.startsWith(WINKEL_URL[w]) && url.length > WINKEL_URL[w].length) || null;
+// Plakken mag slordig: zonder www, met ?zoekwoorden of #stukje erachter.
+const schoonAdres = (t) => t.trim().replace(/[?#].*$/, "").replace(/\/+$/, "")
+  .replace(/^(https?:\/\/)?(www\.)?(jumbo\.com|ah\.nl)\//, "https://www.$3/");
+// Leesbare naam uit het adres, zonder iets op te halen: "Jumbo tofu naturel 375g", "Hak kikkererwten (AH)".
+function productNaam(url) {
+  const w = winkelVan(url);
+  if (!w) return url;
+  const l = url.slice(WINKEL_URL[w].length).replace(w === "ah" ? /^wi\d+\// : /-\d+[A-Z]+$/, "");
+  let naam;
+  try { naam = decodeURIComponent(l); } catch { naam = l; }
+  naam = naam.replace(/-/g, " ").trim().replace(/^ah\b/i, "AH").replace(/^jumbo\b/i, "Jumbo");
+  naam = naam.charAt(0).toUpperCase() + naam.slice(1);
+  return naam.startsWith(WINKEL[w]) ? naam : `${naam} (${WINKEL[w]})`;
 }
+const productLink = (url) => `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(productNaam(url))} ↗</a>`;
+// Iets tonen als tekst met "wijzigen" ernaast; pas na een klik verschijnt het invoerveld.
+const wijzigbaar = (label, tekst, invoer, { open = false, knop = "wijzigen" } = {}) => `<div class="koop"><span>${label}</span>
+    <div class="koop-waarde"${open ? " hidden" : ""}>${tekst}<button type="button" class="linkknop" data-wijzig>${knop}</button></div>
+    <div class="koop-invoer veld"${open ? "" : " hidden"}>${invoer}</div></div>`;
 
 export function ingredientForm(main, data, slug) {
   const nieuw = slug === "nieuw";
@@ -129,23 +139,49 @@ export function ingredientForm(main, data, slug) {
   const plekKeuze = (naam, gekozen, standaard) => `<select name="${naam}"><option value="">standaard (${standaard})</option>${
     ["koelkast", "vriezer", "kast"].map((x) => `<option ${x === gekozen ? "selected" : ""}>${x}</option>`).join("")}</select>`;
 
-  // Soort en varianten: een algemene soort ("Tofu") heeft varianten ("Tofu (Jumbo)"…);
-  // een variant hoort bij precies één soort. Eén niveau diep.
+  // Wat je koopt. Een soort ("Tofu") heeft één normaal product en alternatieven: links (zelfde
+  // product, andere maat/merk/winkel) of varianten (eigen voedingswaarde, verpakking of voorraad,
+  // "Tofu (Jumbo)"…). Een variant hoort bij precies één soort; één niveau diep.
   const mijnVarianten = nieuw ? [] : (variantenPer(data)[slug] || []);
   const naamVan = (s) => data.ingredienten[s]?.naam || s;
+  const isVariant = Boolean(ing.soort && data.ingredienten[ing.soort]);
   const std = ing.standaard && data.ingredienten[ing.standaard];
   const kandidaten = Object.entries(data.ingredienten)
     .filter(([s, i]) => s !== slug && !i.soort && (i.groep === ing.groep || s === ing.soort))
     .sort(([, a], [, b]) => a.naam.localeCompare(b.naam, "nl"));
-  const soortVeld = mijnVarianten.length
-    ? `<p class="hint">Varianten: ${mijnVarianten.map((s) => `<a href="#/ingredient/${esc(s)}">${esc(naamVan(s))}</a>`).join(", ")}.
-         Op de boodschappenlijst en in de voorraad tellen ze samen als "${esc(ing.naam)}".</p>
-       ${veld("Standaardvariant", `<select name="standaard"><option value="">geen (eigen waarden)</option>${mijnVarianten.map((s) =>
-         `<option value="${esc(s)}" ${s === ing.standaard ? "selected" : ""}>${esc(naamVan(s))}</option>`).join("")}</select>`,
-         "Recepten met deze algemene naam rekenen met de voedingswaarde, prijs en verpakking van deze variant (tenzij je hier zelf iets invult).")}`
-    : veld("Variant van", `<select name="soort"><option value="">geen: zelfstandig product</option>${kandidaten.map(([s, i]) =>
-        `<option value="${esc(s)}" ${s === ing.soort ? "selected" : ""}>${esc(i.naam)}</option>`).join("")}</select>`,
-        "Kies dit als het hetzelfde product is van een ander merk of in een andere verpakking. Voorraad en boodschappenlijst tellen ze dan samen.");
+  const variantVan = veld("Variant van", `<select name="soort"><option value="">geen: zelfstandig product</option>${kandidaten.map(([s, i]) =>
+    `<option value="${esc(s)}" ${s === ing.soort ? "selected" : ""}>${esc(i.naam)}</option>`).join("")}</select>`,
+    "Alleen als het een eigen voedingswaarde, verpakking of voorraad heeft. Voorraad en boodschappenlijst tellen ze dan samen.");
+  const normaalKeuze = veld("Normaal koop je", `<select name="standaard"><option value="">dit product zelf</option>${mijnVarianten.map((s) =>
+    `<option value="${esc(s)}" ${s === ing.standaard ? "selected" : ""}>${esc(naamVan(s))}</option>`).join("")}</select>`,
+    `Recepten met "${esc(ing.naam)}" rekenen met de voedingswaarde, prijs en verpakking hiervan; aanbiedingen worden met die prijs vergeleken.`);
+  const varianten = `<div class="koop"><span>Varianten</span><div class="koop-waarde">${mijnVarianten.map((s) => {
+    const p = data.ingredienten[s].prijs_per_kg;
+    return `<a href="#/ingredient/${esc(s)}">${esc(naamVan(s))}</a>${p != null ? ` <small>${esc(euro(p))}/kg</small>` : ""}`;
+  }).join(" · ")}</div><small class="hint">Op de boodschappenlijst en in de voorraad tellen ze samen als "${esc(ing.naam)}".</small></div>`;
+  const productVeld = `<div data-eigen-product${std ? " hidden" : ""}>${wijzigbaar(isVariant ? "Product bij Jumbo" : "Normaal product",
+    ing.product ? productLink(ing.product) : "",
+    `<input name="product" type="url" value="${waarde(ing.product)}" placeholder="plak hier de link van het product op jumbo.com">
+     <small>Dit product geeft de prijs bij "Prijzen en aanbiedingen bijwerken" (Boodschappen). Leeg = de prijs zelf bijhouden.</small>`,
+    { open: !ing.product })}</div>`;
+  const prijsHint = ing.product
+    ? (ing.prijs_datum ? `van Jumbo, bijgewerkt ${datumNl(ing.prijs_datum)}` : "komt van Jumbo bij de volgende keer bijwerken")
+    : std && ing.prijs_per_kg == null ? `leeg = de prijs van ${std.naam}` : "zelf bijhouden";
+  const prijsVeld = veld("Prijs (€/kg of €/l)", `<input name="prijs_per_kg" type="number" step="any" min="0" value="${waarde(ing.prijs_per_kg)}"${
+    std && ing.prijs_per_kg == null && std.prijs_per_kg != null ? ` placeholder="${waarde(std.prijs_per_kg)}"` : ""}>`, `<span data-prijshint>${esc(prijsHint)}</span>`);
+  const alt = ing.alternatieven || [];
+  const altVeld = wijzigbaar("Telt ook mee voor aanbiedingen",
+    alt.length ? alt.map(productLink).join(" · ") : `<span class="hint">nog niets</span>`,
+    `<textarea name="alternatieven" rows="${Math.max(3, alt.length + 1)}" placeholder="één link per regel, van jumbo.com of ah.nl">${esc(alt.join("\n"))}</textarea>
+     <small>Hetzelfde product in een andere maat, van een ander merk of van AH. Zelfde voedingswaarde en zo
+       gewogen? Zet de link hier. Anders: maak er een variant van.</small>`,
+    { knop: alt.length ? "wijzigen" : "toevoegen" });
+  const koopVelden = mijnVarianten.length
+    ? normaalKeuze + productVeld + prijsVeld + varianten + altVeld
+    : isVariant
+      ? variantVan + productVeld + prijsVeld + `<p class="hint">Andere producten, en de normale prijs waarmee aanbiedingen vergeleken
+          worden: zie <a href="#/ingredient/${esc(ing.soort)}">${esc(naamVan(ing.soort))}</a>.</p>`
+      : productVeld + prijsVeld + altVeld + variantVan;
   const geerfd = (k) => (std && ing.per_100g == null ? ` placeholder="${waarde(std.per_100g?.[k])}"` : "");
 
   main.innerHTML = `
@@ -160,8 +196,8 @@ export function ingredientForm(main, data, slug) {
         ${veld("Rol *", `<select name="rol">${ROLLEN.map((r) => `<option ${r === ing.rol ? "selected" : ""}>${r}</option>`).join("")}</select>`)}
         ${veld("Filterlabel", `<input name="tag" value="${waarde(ing.tag)}">`, "bv. 'kip' of 'tofu', voor het filteren van recepten")}
       </fieldset>
-      <fieldset><legend>Soort en varianten</legend>
-        ${soortVeld}
+      <fieldset><legend>Wat je koopt</legend>
+        ${koopVelden}
       </fieldset>
       <fieldset><legend>Voedingswaarde per 100 g</legend>
         <div class="vier">
@@ -172,13 +208,11 @@ export function ingredientForm(main, data, slug) {
         </div>
         ${std && ing.per_100g == null ? `<p class="hint">Leeg = de waarden van ${esc(std.naam)} (standaardvariant).</p>` : ""}
       </fieldset>
-      <fieldset><legend>Prijs en omrekenen</legend>
+      <fieldset><legend>Omrekenen</legend>
         <div class="vier">
-          ${veld("Prijs (€/kg of €/l)", `<input name="prijs_per_kg" type="number" step="any" min="0" value="${waarde(ing.prijs_per_kg)}">`)}
           ${veld("Gram per stuk", `<input name="stuk" type="number" step="any" min="0" value="${waarde(ing.gram_per?.stuk)}">`, "bv. 1 ui = 100")}
           ${veld("Dichtheid (g/ml)", `<input name="dichtheid" type="number" step="any" min="0" value="${waarde(ing.dichtheid)}">`, "alleen als niet ±1, bv. olie 0,92")}
         </div>
-        ${winkelHtml(ing)}
       </fieldset>
       <fieldset><legend>Verpakking en bewaren</legend>
         <div class="vier">
@@ -225,8 +259,18 @@ export function ingredientForm(main, data, slug) {
   };
   for (const v of ["verpakking", "verpakking_g", "stuk"]) form[v].addEventListener("input", stuksTonen);
   stuksTonen();
-  // Zelf een andere prijs getypt bij een gekoppeld product: die niet meer overschrijven.
-  if (form.prijs_handmatig) form.prijs_per_kg.addEventListener("input", () => { form.prijs_handmatig.checked = true; });
+  // Wat je koopt: "wijzigen" toont het invoerveld; de standaardvariant bepaalt of dit een eigen product heeft.
+  form.querySelectorAll("[data-wijzig]").forEach((b) => b.addEventListener("click", () => {
+    const blok = b.closest(".koop");
+    blok.querySelector(".koop-waarde").hidden = true;
+    blok.querySelector(".koop-invoer").hidden = false;
+    blok.querySelector("input, textarea").focus();
+  }));
+  form.standaard?.addEventListener("change", () => { form.querySelector("[data-eigen-product]").hidden = Boolean(form.standaard.value); });
+  // Zelf een prijs getypt terwijl er een product is: die wordt bij bijwerken weer de Jumboprijs.
+  form.prijs_per_kg.addEventListener("input", () => {
+    if (form.product.value.trim() && !form.standaard?.value) form.querySelector("[data-prijshint]").textContent = "wordt bij bijwerken weer de Jumboprijs";
+  });
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -248,8 +292,17 @@ export function ingredientForm(main, data, slug) {
     if (form.soort) { if (form.soort.value) uit.soort = form.soort.value; else delete uit.soort; }
     if (form.standaard) { if (form.standaard.value) uit.standaard = form.standaard.value; else delete uit.standaard; }
     uit.prijs_per_kg = getal("prijs_per_kg");
-    if (form.prijs_handmatig) {
-      if (form.prijs_handmatig.checked) { uit.prijs_handmatig = true; delete uit.prijs_datum; } else delete uit.prijs_handmatig;
+    // Product (Jumbo, geeft de prijs) en andere producten die meetellen voor aanbiedingen.
+    const product = !form.standaard?.value && form.product.value.trim() ? schoonAdres(form.product.value) : null;
+    if (product && winkelVan(product) !== "jumbo") return fout("Het product moet een link naar een product op jumbo.com zijn.");
+    if (product) uit.product = product; else delete uit.product;
+    if (product !== (ing.product ?? null)) delete uit.prijs_datum; // nieuwe prijs bij de volgende keer bijwerken
+    if (form.alternatieven) {
+      const alt = [...new Set(form.alternatieven.value.split(/\s+/).filter(Boolean).map(schoonAdres))].filter((u) => u !== product);
+      const verkeerd = alt.find((u) => !winkelVan(u));
+      if (verkeerd) return fout(`Dit is geen link naar een product van Jumbo of AH: ${verkeerd}`);
+      if (alt.length && uit.soort) return fout(`Andere producten horen bij de algemene naam: zet ze bij ${naamVan(uit.soort)} en maak dit veld hier leeg.`);
+      if (alt.length) uit.alternatieven = alt; else delete uit.alternatieven;
     }
     const gp = { ...(ing.gram_per || {}) };
     if (getal("stuk") != null) gp.stuk = getal("stuk"); else delete gp.stuk;

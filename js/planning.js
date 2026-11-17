@@ -786,20 +786,33 @@ function redenenVoor(r, laatst, dek, metVoorraad, dag, actie = []) {
 }
 
 // ---- Aanbiedingen ----
-// data/aanbiedingen.json: wat er bij AH en Jumbo in de aanbieding is voor gekoppelde producten.
+// data/aanbiedingen.json: wat er bij AH en Jumbo in de aanbieding is voor gekoppelde producten
+// (het product en de alternatieven van een ingrediënt en zijn varianten), met de prijs per kg.
 // Alleen opgehaald als je op de knop drukt (Boodschappen, laptop). Geen bestand = geen
 // aanbiedingen, en dan werkt alles gewoon zoals zonder. Elke aanbieding geldt van `vanaf` t/m `tot`.
+// Eén regel overal: een aanbieding telt als hij per kg minstens VOORDEEL % goedkoper is dan wat
+// je normaal betaalt (de prijs van de soort, dus van de standaardvariant).
 export const WINKEL_NAAM = { jumbo: "Jumbo", ah: "AH" };
+export const VOORDEEL = 10;
 const alleAanbiedingen = (data) => data.aanbiedingen?.aanbiedingen || [];
 export const heeftAanbiedingen = (data) => alleAanbiedingen(data).some((a) => a.tot >= vandaag());
-export const kortingVan = (a) => a.korting ?? (a.van > a.prijs ? (1 - a.prijs / a.van) * 100 : 0);
 export const aanbiedingTekst = (a) => `${WINKEL_NAAM[a.winkel] || a.winkel}: ${a.actie}`;
+// De gewone prijs per kg waarmee een aanbieding vergeleken wordt (of null).
+export const normaalPrijs = (data, a) => ingVan(data, soortVan(data, a.ingredient))?.prijs_per_kg ?? null;
+// Hoeveel procent goedkoper dan normaal (0 als dat niet te zeggen is).
+export function voordeelVan(data, a) {
+  const normaal = normaalPrijs(data, a);
+  return a.per_kg > 0 && normaal > 0 ? (1 - a.per_kg / normaal) * 100 : 0;
+}
 
-// Aanbiedingen voor een soort die ergens tussen `van` en `tot` gelden, grootste korting eerst.
+// Aanbiedingen die tellen voor een soort en ergens tussen `van` en `tot` gelden, grootste voordeel eerst.
 export function aanbiedingenVan(data, slug, van = vandaag(), tot = van) {
   return alleAanbiedingen(data)
     .filter((a) => data.ingredienten[a.ingredient] && soortVan(data, a.ingredient) === slug && a.vanaf <= tot && a.tot >= van)
-    .sort((a, b) => kortingVan(b) - kortingVan(a));
+    .map((a) => ({ a, v: voordeelVan(data, a) }))
+    .filter((x) => x.v >= VOORDEEL)
+    .sort((x, y) => y.v - x.v)
+    .map((x) => x.a);
 }
 
 // De ingrediënten van een recept die ertoe doen (geen zout en kruiden): [{slug, naam}].
@@ -815,10 +828,9 @@ function soortenVan(r, data, cache) {
 // [{naam, a}]. `cache` (een Map) scheelt rekenwerk als je dit voor veel vakken vraagt.
 export function inDeAanbieding(r, data, dag = plusDagen(vandaag(), 6), cache = null) {
   if (!heeftAanbiedingen(data)) return [];
-  // Een paar procent korting is geen reden om iets te gaan koken: pas vanaf 10%.
   return soortenVan(r, data, cache)
     .map(({ slug, naam }) => ({ naam, a: aanbiedingenVan(data, slug, vandaag(), dag)[0] }))
-    .filter((x) => x.a && kortingVan(x.a) >= 10);
+    .filter((x) => x.a);
 }
 
 export const actieReden = (actie) => `In de aanbieding: ${actie.map((x) =>
@@ -826,7 +838,7 @@ export const actieReden = (actie) => `In de aanbieding: ${actie.map((x) =>
 
 // "Slim inslaan": wat nu in de aanbieding is, lang goed blijft (kast, vriezer) en wat je echt
 // gebruikt (vaste voorraad, of in iets wat je de laatste 60 dagen kookte). Niet wat al op de
-// lijst staat (daar staat de aanbieding al bij). Hooguit 3, grootste korting eerst.
+// lijst staat (daar staat de aanbieding al bij). Hooguit 3, grootste voordeel eerst.
 export function koopAdvies(data, lijst) {
   if (!heeftAanbiedingen(data)) return [];
   const opLijst = new Set(lijst.filter((x) => x.status === "kopen").map((x) => x.slug));
@@ -846,9 +858,9 @@ export function koopAdvies(data, lijst) {
     if (!(b.plek === "vriezer" || b.dagen >= 30)) continue;
     // Ook wat over een paar dagen begint (Jumbo wisselt op woensdag, AH op maandag).
     const a = aanbiedingenVan(data, slug, vandaag(), plusDagen(vandaag(), 3))[0];
-    if (a && kortingVan(a) >= 15) uit.push({ slug, ing, a });
+    if (a) uit.push({ slug, ing, a });
   }
-  return uit.sort((x, y) => kortingVan(y.a) - kortingVan(x.a)).slice(0, 3);
+  return uit.sort((x, y) => voordeelVan(data, y.a) - voordeelVan(data, x.a)).slice(0, 3);
 }
 
 // Stelt een menu voor de komende dagen voor. Niets wordt opgeslagen.

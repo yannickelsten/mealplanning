@@ -469,6 +469,16 @@ legend { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; co
 .veld > span { font-size: .85rem; }
 .veld small, .hint { color: var(--zacht); font-size: .78rem; margin: 0; }
 .vier { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 12px; align-items: start; }
+/* ingrediënt: wat je koopt (eerst tonen, wijzigen op verzoek) */
+.koop { display: grid; gap: 3px; margin: 6px 0 10px; }
+.koop > span { font-size: .85rem; }
+.koop-waarde { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; overflow-wrap: anywhere; }
+.koop-invoer { margin: 0; }
+.koop [hidden] { display: none; }
+.veld textarea { font: inherit; font-size: .85rem; color: inherit; background: var(--kaart); width: 100%; min-width: 0;
+  border: 1px solid var(--lijn); border-radius: 8px; padding: 9px 12px; resize: vertical; }
+.linkknop { font: inherit; font-size: .8rem; background: none; border: 0; padding: 0; color: var(--zacht);
+  text-decoration: underline; cursor: pointer; }
 .fout { color: var(--waarsch); background: var(--waarsch-zacht); padding: 8px 12px; border-radius: 6px; margin: 0; }
 .knoppen { display: flex; gap: 8px; }
 .knop {

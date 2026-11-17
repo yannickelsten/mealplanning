@@ -108,8 +108,8 @@ async function verstuur(naam, aanpassing) {
   throw new Error("Opslaan mislukt, het bestand werd steeds tegelijk gewijzigd. Probeer het opnieuw.");
 }
 
-// Een klus op de server starten en volgen: "prijzen" (gewone prijzen van Jumbo bijwerken) of
-// "aanbiedingen" (AH + Jumbo ophalen). Alleen als je op de knop drukt. `voortgang(status)` krijgt
+// Een klus op de server starten en volgen: "bijwerken" (Jumboprijzen + aanbiedingen van AH en
+// Jumbo). Alleen als je op de knop drukt. `voortgang(status)` krijgt
 // tussendoor {voortgang: 0..1, tekst}. Geeft de uitkomst; een fout wordt een Error.
 export async function taak(naam, voortgang = () => {}) {
   const vraag = (opties) => fetch(`/api/taak/${naam}`, opties).then(async (r) => {
