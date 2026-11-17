@@ -69,27 +69,50 @@ async function render() {
 }
 
 // Scrollpositie per stap in de geschiedenis: met "terug" (of "vooruit") kom je weer waar je was;
-// een nieuwe pagina via een link begint bovenaan. Elke stap krijgt een id (history.state.plek);
-// bij het wisselen staat de oude pagina nog op het scherm, dus dan wordt zijn positie bewaard.
+// een nieuwe pagina via een link begint bovenaan. Elke stap krijgt een id (history.state.plek) en
+// onthoudt van welke pagina je kwam (history.state.van); bij het wisselen staat de oude pagina nog
+// op het scherm, dus dan wordt zijn positie bewaard: per stap, en per pagina (de laatste keer).
 // In sessionStorage, zodat ook herladen op dezelfde plek uitkomt (lukt dat niet: gewoon bovenaan).
 history.scrollRestoration = "manual";
 const plekken = (() => { try { return JSON.parse(sessionStorage.getItem("plekken")) || {}; } catch { return {}; } })();
-const plekId = () => {
-  if (!history.state?.plek) history.replaceState({ ...history.state, plek: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }, "");
-  return history.state.plek;
+plekken.stap ||= {};
+plekken.pagina ||= {};
+let huidig = null; // [id, hash] van de pagina op het scherm
+let terugModus = false;
+const plekId = (van) => {
+  if (!history.state?.plek) {
+    history.replaceState({ ...history.state, plek: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), van }, "");
+  }
+  return [history.state.plek, location.hash];
 };
-let huidig = plekId();
-const bewaarPlekken = () => { try { sessionStorage.setItem("plekken", JSON.stringify(plekken)); } catch { /* geen opslag: niet erg */ } };
+const verlaat = () => { if (huidig) { plekken.stap[huidig[0]] = plekken.pagina[huidig[1]] = scrollY; } };
 const naarPlek = () => {
-  huidig = plekId();
-  const y = plekken[huidig] || 0;
+  huidig = plekId(huidig?.[1]);
+  const y = plekken.stap[huidig[0]] ?? (terugModus ? plekken.pagina[huidig[1]] : 0) ?? 0;
+  terugModus = false;
   return render().then(() => window.scrollTo(0, y));
 };
-window.addEventListener("hashchange", () => {
-  plekken[huidig] = scrollY; // de pagina die je verlaat
-  naarPlek();
+window.addEventListener("hashchange", () => { verlaat(); naarPlek(); });
+window.addEventListener("pagehide", () => {
+  verlaat();
+  try { sessionStorage.setItem("plekken", JSON.stringify(plekken)); } catch { /* geen opslag: niet erg */ }
 });
-window.addEventListener("pagehide", () => { plekken[huidig] = scrollY; bewaarPlekken(); });
+// Terug naar een pagina (knop "← Ingrediënten", na opslaan…): kwam je daar net vandaan, dan echt
+// "terug" in de geschiedenis (op dezelfde plek, en de terugknop van de browser klopt daarna ook);
+// anders erheen, op de plek waar je die pagina het laatst verliet.
+function terug(hash) {
+  if (hash === location.hash) return;
+  if (history.state?.van === hash) return history.back();
+  terugModus = true;
+  location.hash = hash;
+}
+window.addEventListener("terug", (e) => terug(e.detail));
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a.terug");
+  if (!a || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  terug(a.getAttribute("href"));
+});
 // Opnieuw tekenen zonder te scrollen (na "Ongedaan maken", zie melding in util.js).
 window.addEventListener("tekenen", () => render());
 

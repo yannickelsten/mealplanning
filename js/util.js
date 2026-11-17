@@ -124,6 +124,9 @@ export function houdbaar(iso) {
 // Korte melding onderaan. Met `ongedaan` (een functie die de actie terugdraait) komt er een
 // knop "Ongedaan maken" bij en blijft de melding langer staan; daarna wordt de pagina
 // opnieuw getekend.
+// Terug naar een eerdere pagina, op de plek waar je was (zie "terug" in main.js).
+export const terugNaar = (hash) => window.dispatchEvent(new CustomEvent("terug", { detail: hash }));
+
 export function melding(tekst, ongedaan = null) {
   document.querySelectorAll(".melding").forEach((x) => x.remove());
   const el = document.createElement("div");

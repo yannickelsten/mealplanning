@@ -3,7 +3,7 @@
 import { bewaarRecept, laad, verwijderRecept } from "../store.js";
 import { voeding } from "../voeding.js";
 import { MOMENTEN, momentenVan } from "../planning.js";
-import { esc, melding, nl, slugVan, vandaag } from "../util.js";
+import { esc, melding, nl, slugVan, terugNaar, vandaag } from "../util.js";
 
 const RECEPT_EENHEDEN = ["keer", "portie", "g", "kg", "ml", "l"];
 const LEEG = () => ({ titel: "", ondertitel: "", porties: 2, tags: { keuken: [], vibe: [] }, variant_van: null,
@@ -304,7 +304,7 @@ export function bewerken(main, data, id) {
       await bewaarRecept(doelId, categorie, uit, { forceer });
       await laad(true);
       melding(nieuwId ? "Variant opgeslagen" : "Opgeslagen");
-      location.hash = `#/recept/${doelId}`;
+      terugNaar(`#/recept/${doelId}`);
     } catch (err) {
       if (!err.conflict || !id || nieuwId) return toonFout(esc(err.message));
       toonFout(`${esc(err.message)}<br>
@@ -354,7 +354,7 @@ export function bewerken(main, data, id) {
       await verwijderRecept(origineel);
       await laad(true);
       melding("Verwijderd (staat in de prullenbak)");
-      location.hash = origineel.variant_van ? `#/recept/${origineel.variant_van}` : "#/";
+      terugNaar(origineel.variant_van ? `#/recept/${origineel.variant_van}` : "#/");
     } catch (err) {
       toonFout(esc(err.message));
     }

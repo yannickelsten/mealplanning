@@ -1,6 +1,6 @@
 import { bewaarIngredient, laad } from "../store.js";
 import { rekenIng, VOEDING_KEYS } from "../voeding.js";
-import { datumNl, esc, euro, groepNaam, melding, nl, slugVan } from "../util.js";
+import { datumNl, esc, euro, groepNaam, melding, nl, slugVan, terugNaar } from "../util.js";
 
 const ROLLEN = ["eiwitbron", "peulvrucht", "groente", "fruit", "koolhydraat", "zuivel",
   "smaakmaker", "kruid", "vet", "snack", "overig"];
@@ -330,7 +330,7 @@ export function ingredientForm(main, data, slug) {
       await bewaarIngredient(nieuweSlug, uit);
       await laad(true);
       melding("Opgeslagen");
-      location.hash = "#/ingredienten";
+      terugNaar("#/ingredienten");
     } catch (err) {
       fout(err.message);
     }

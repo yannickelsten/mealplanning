@@ -1,7 +1,7 @@
 // Kookstand: één stap per scherm, grote letters, scherm blijft aan, met kookwekker.
 import { regels } from "../voeding.js";
 import { kookbeurtOpMenu } from "../planning.js";
-import { esc, hoeveelheid, melding } from "../util.js";
+import { esc, hoeveelheid, melding, terugNaar } from "../util.js";
 import { receptStaat } from "./recept.js";
 import { gekookt } from "./gekookt.js";
 
@@ -97,7 +97,7 @@ export function koken(main, data, id) {
     main.querySelector("[data-gekookt]")?.addEventListener("click", () => {
       const opMenu = kookbeurtOpMenu(data, id);
       gekookt({ data, recept: r, porties: s.porties, keuze: s.keuze, menuId: opMenu?.id,
-        klaar: () => { location.hash = `#/recept/${id}`; } });
+        klaar: () => terugNaar(`#/recept/${id}`) });
     });
     schermAan().then((ok) => {
       const el = main.querySelector(".k-scherm");
