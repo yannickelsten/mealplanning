@@ -17,14 +17,19 @@
 <body>
   <header class="balk">
     <a class="logo" href="#/">Mealplanning</a>
-    <nav>
-      <a href="#/" data-nav="recepten">Recepten</a>
-      <a href="#/menu" data-nav="menu">Wat eten we?</a>
-      <a href="#/boodschappen" data-nav="boodschappen">Boodschappen</a>
+    <nav class="hoofdnav">
+      <a href="#/" data-nav="menu">Eten</a>
+      <a href="#/boodschappen" data-nav="boodschappen">Boodschappen<span class="nav-tel" id="nav-tel"></span></a>
       <a href="#/voorraad" data-nav="voorraad">Voorraad</a>
-      <a href="#/logboek" data-nav="logboek">Logboek</a>
-      <a href="#/ingredienten" data-nav="ingredienten">Ingrediënten</a>
-      <a href="#/telefoon" data-nav="telefoon">Telefoon</a>
+      <a href="#/recepten" data-nav="recepten">Recepten</a>
+      <details class="meer">
+        <summary>Meer</summary>
+        <div class="meer-paneel">
+          <a href="#/logboek" data-nav="logboek">Logboek</a>
+          <a href="#/ingredienten" data-nav="ingredienten">Ingrediënten</a>
+          <a href="#/telefoon" data-nav="telefoon">Telefoon</a>
+        </div>
+      </details>
     </nav>
   </header>
   <div id="verbinding" hidden></div>

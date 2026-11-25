@@ -39,11 +39,11 @@ export function oudePorties(data) {
   });
 }
 
-// Bewaarde porties als lijst; optioneel alleen één plek en/of een zoekterm.
-export function portiesHtml(data, { plek = null, zoek = "" } = {}) {
+// Bewaarde porties als lijst; optioneel alleen één plek, één recept, een zoekterm en/of een filter.
+export function portiesHtml(data, { plek = null, zoek = "", recept = null, filter = null } = {}) {
   const z = zoek.toLowerCase();
-  const lijst = bewaardePorties(data).filter((p) => (!plek || p.plek === plek)
-    && (!z || titel(data, p).toLowerCase().includes(z)));
+  const lijst = bewaardePorties(data).filter((p) => (!plek || p.plek === plek) && (!recept || p.recept === recept)
+    && (!z || titel(data, p).toLowerCase().includes(z)) && (!filter || filter(p)));
   if (!lijst.length) return "";
   return `<ul class="portielijst">${lijst.map((p) => {
     const r = data.recepten[p.recept];

@@ -832,10 +832,12 @@ export function gauwOp(data, dagen = GAUW) {
 // Hoe goed past een recept bij de voorraad? Alleen ingrediënten die er echt toe doen
 // (met hoeveelheid, geen zout/kruiden). `gauw` = gebruikt iets dat binnen 3 dagen op moet
 // (ook aangebroken verpakkingen).
-export function dekking(recept, data) {
+// Optioneel voor een aantal porties en een keuze (de receptpagina); anders het recept zoals het is.
+export function dekking(recept, data, porties = null, keuze = null) {
   let totaal = 0;
   const ontbreekt = [], gauw = [];
-  for (const x of benodigd([{ recept: recept.id }], data, bewaardeOnderdelen(data)).values()) {
+  const g = { recept: recept.id, ...(porties != null ? { porties } : {}), ...(keuze ? { keuze } : {}) };
+  for (const x of benodigd([g], data, bewaardeOnderdelen(data)).values()) {
     if (x.ing.verwaarloosbaar || !x.nodig.length) continue;
     totaal++;
     const partijen = partijenVan(data, x.slug);
@@ -1028,8 +1030,42 @@ function kookInKopie(kopie, g) {
   onderdelenAfnemen(kopie.voorraad.porties, onderdelen.gebruikt, kopie);
 }
 
+// Hoe goed een gerecht nu past: één score voor de suggesties, het kiesvenster en het weekplan,
+// zodat een gerecht overal even hoog staat. Lang niet gegeten (tot 60 dagen), afwisseling deze week,
+// wat gauw op moet, wat in huis is, en (een duwtje) aanbiedingen.
+// ctx: {week: dezeWeek(), laatst: laatstGegeten(), dag?: wanneer je het eet, metVoorraad, cache?: Map}
+// Geeft {score, l: laatst gegeten, dek: dekking, ov: overlap, actie: aanbiedingen}.
+export function gerechtScore(r, data, ctx) {
+  const l = ctx.laatst[r.id];
+  const dek = dekking(r, data);
+  const ov = overlap(r, data, ctx.week);
+  const dag = ctx.dag || vandaag();
+  let score = Math.min(l ? -dagenTot(l.datum) : 60, 60) - 8 * ov.score;
+  score += 12 * dek.gauw.filter((x) => dag <= x.datum).length;
+  if (ctx.metVoorraad && dek.totaal) score += dek.ontbreekt.length ? -2 * dek.ontbreekt.length : 6;
+  const actie = inDeAanbieding(r, data, ctx.dag || plusDagen(vandaag(), 6), ctx.cache);
+  score += Math.min(12, 6 * actie.length);
+  return { score, l, dek, ov, actie };
+}
+
+// Het eerste vrije vak vanaf vandaag (twee weken vooruit) bij een moment dat bij het recept past
+// en dat je plant (weekplan-keuze, anders lunch en avondeten): {dag, moment}.
+export function eersteVrijVak(data, recept) {
+  const past = momentenVan(recept, data);
+  const gepland = data.instellingen.planner?.momenten || ["lunch", "diner"];
+  const momenten = MOMENTEN.map(([m]) => m).filter((m) => past.includes(m) && gepland.includes(m));
+  const kies = momenten.length ? momenten : past.length ? past : ["diner"];
+  const vol = new Set(data.menu.gerechten.filter((g) => g.dag).map((g) => vakSleutel(g.dag, g.elders ? g.moment : momentVan(g, data))));
+  for (let n = 0; n < 14; n++) {
+    const dag = plusDagen(vandaag(), n);
+    const m = kies.find((x) => !vol.has(vakSleutel(dag, x)));
+    if (m) return { dag, moment: m };
+  }
+  return { dag: vandaag(), moment: kies[0] };
+}
+
 // Waarom dit gerecht: korte zinnen voor op het voorstel.
-function redenenVoor(r, laatst, dek, metVoorraad, dag, actie = []) {
+export function redenenVoor(r, laatst, dek, metVoorraad, dag, actie = []) {
   const uit = [laatst ? `Laatst gegeten ${geleden(laatst.datum)}` : "Nog niet gegeten"];
   const gauw = dek.gauw.filter((x) => dag <= x.datum);
   if (gauw.length) uit.push(`Gebruikt ${gauw.map((x) => `${x.naam.toLowerCase()} (${x.open ? "open, " : ""}${houdbaar(x.datum)})`).join(", ")}`);
@@ -1219,16 +1255,9 @@ export function stelPlanVoor(data, opties = {}) {
     let beste = null;
     for (const r of kandidaten) {
       if (gebruikt.has(r.id) || uitgesloten.has(r.id) || !momentenVan(r, data).includes(vak.moment)) continue;
-      const l = laatst[r.id];
-      const dek = dekking(r, kopie);
-      let score = Math.min(l ? -dagenTot(l.datum) : 60, 60) - 8 * overlap(r, kopie, week).score;
-      score += 12 * dek.gauw.filter((x) => vak.dag <= x.datum).length;
-      if (metVoorraad && dek.totaal) score += dek.ontbreekt.length ? -2 * dek.ontbreekt.length : 6;
-      // In de aanbieding: een duwtje, niet meer dan wat gauw op moet of afwisseling.
-      const actie = inDeAanbieding(r, data, vak.dag, soorten);
-      score += Math.min(12, 6 * actie.length);
-      score += (dagwaarde(`${r.id}|${ronde}|${vak.dag}|${vak.moment}`) % 1000) / 1000 * ruis;
-      if (!beste || score > beste.score) beste = { r, score, l, dek, actie };
+      const s = gerechtScore(r, kopie, { week, laatst, dag: vak.dag, metVoorraad, cache: soorten });
+      const score = s.score + (dagwaarde(`${r.id}|${ronde}|${vak.dag}|${vak.moment}`) % 1000) / 1000 * ruis;
+      if (!beste || score > beste.score) beste = { r, ...s, score };
     }
     if (!beste) continue;
     const { r } = beste;

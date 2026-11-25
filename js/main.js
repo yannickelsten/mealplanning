@@ -10,11 +10,12 @@ import { voorraad } from "./views/voorraad.js";
 import { boodschappen } from "./views/boodschappen.js";
 import { logboek } from "./views/logboek.js";
 import { koppelScherm, telefoon } from "./views/telefoon.js";
+import { boodschappenlijst } from "./planning.js";
 
 // Op de telefoon (via GitHub) kunnen recepten niet bewerkt worden: zie store.js.
 const opLaptop = (view) => (main, data, id) => alleenLezen
   ? (main.innerHTML = `<p class="waarschuwing los">Recepten bewerken kan op de laptop.</p>
-      <a class="terug" href="${id ? `#/recept/${encodeURIComponent(id)}` : "#/"}">← Terug</a>`)
+      <a class="terug" href="${id ? `#/recept/${encodeURIComponent(id)}` : "#/recepten"}">← Terug</a>`)
   : view(main, data, id);
 document.body.classList.toggle("telefoon", soort === "github");
 if (soort === "github") {
@@ -24,8 +25,10 @@ if (soort === "github") {
 }
 
 // [patroon, pagina, menu-knop, bezig: niet vanzelf verversen (er wordt iets ingevuld)]
+// De app opent op "Eten" (wat eten we?); de eerste route is ook wat er bij een onbekend adres komt.
 const ROUTES = [
-  [/^#?\/?$/, overzicht, "recepten"],
+  [/^#?\/?$/, menu, "menu"],
+  [/^#\/recepten$/, overzicht, "recepten"],
   [/^#\/recept\/([^/]+)$/, recept, "recepten"],
   [/^#\/recept\/([^/]+)\/bewerken$/, opLaptop(bewerken), "recepten", true],
   [/^#\/nieuw-recept$/, opLaptop(bewerken), "recepten", true],
@@ -47,11 +50,22 @@ const route = () => {
   return [r, hash.match(r[0])?.slice(1) || []];
 };
 
+const meer = document.querySelector("details.meer");
+const navTel = document.querySelector("#nav-tel");
+// "Meer" klapt dicht bij klikken ernaast of op een keuze.
+document.addEventListener("click", (e) => { if (meer.open && (!meer.contains(e.target) || e.target.closest("a"))) meer.open = false; });
+
 async function render() {
   const [[, view, nav], params] = route();
   document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("aan", a.dataset.nav === nav));
+  meer.classList.toggle("aan", !!meer.querySelector(`[data-nav="${nav}"]`));
+  meer.open = false;
+  document.body.classList.toggle("kookstand", view === koken); // geen menubalk tijdens het koken
   try {
     const data = await laad();
+    // Hoeveel er nu te kopen is, bij "Boodschappen" in de menubalk.
+    const n = boodschappenlijst(data).filter((x) => x.status === "kopen" && !x.later).length + data.boodschappen.extra.length;
+    navTel.textContent = n ? String(n) : "";
     // Bestanden die niet ingelezen konden worden (bv. een tikfout in een recept van Claude).
     problemen.innerHTML = data.problemen?.length ? `<div class="waarschuwing los">
       <b>Niet alles kon worden ingelezen</b> (de rest werkt gewoon):

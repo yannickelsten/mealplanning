@@ -197,23 +197,42 @@ export function ingredientForm(main, data, slug) {
       "het sap van één citroen is ±40 ml")}</span>
   </div>`;
 
+  // Samenvatting bovenaan en bij elk ingeklapt blok: zo zie je alles zonder iets open te klikken
+  // (bekijken eerst, aanpassen op verzoek). Een algemene soort toont de waarden van zijn standaardmerk.
+  const rek = nieuw ? ing : rekenIng(data.ingredienten, slug);
+  const pak = Object.keys(rek.gram_per || {}).find((x) => data.eenheden[x]?.verpakking);
+  const bw = { ...groepAdvies, ...(rek.bewaren || {}) };
+  const kort = {
+    algemeen: [groepNaam(ing.groep || "–"), ing.rol, ing.tag && `label "${ing.tag}"`].filter(Boolean).join(" · "),
+    koop: ing.altijd_in_huis ? "altijd in huis, nooit kopen"
+      : ing.komt_uit ? `komt uit ${naamVan(ing.komt_uit).toLowerCase()} (één stuk geeft ${nl(ing.gram_per?.stuk || 0)} g)`
+      : [rek.product ? productNaam(rek.product) : "geen product gekoppeld", rek.prijs_per_kg != null ? `${euro(rek.prijs_per_kg)}/kg` : "geen prijs",
+        mijnVarianten.length && `${mijnVarianten.length} varianten`, isVariant && `variant van ${naamVan(ing.soort)}`].filter(Boolean).join(" · "),
+    voeding: rek.per_100g ? `${nl(rek.per_100g.kcal)} kcal · ${nl(rek.per_100g.eiwit, 1)} g eiwit per 100 g` : rek.verwaarloosbaar ? "telt niet mee" : "ontbreekt",
+    verpakking: [pak ? `${pak} van ${nl(rek.gram_per[pak])} g` : "geen verpakking", !ing.komt_uit && rek.gram_per?.stuk && `1 stuk = ${nl(rek.gram_per.stuk)} g`,
+      rek.per_stuk && "per stuk", rek.dichtheid && `dichtheid ${nl(rek.dichtheid, 2)}`].filter(Boolean).join(" · "),
+    bewaren: `${bw.plek}, dicht ±${bw.dagen} dagen, open ±${bw.open} dagen${bw.open_plek !== bw.plek ? ` in de ${bw.open_plek}` : ""}${ing.bewaren ? "" : " (groepsadvies)"}`,
+    kenmerken: [ing.vlees && "vlees of vis", ing.verwaarloosbaar && "verwaarloosbaar", ing.altijd_in_huis && "altijd in huis",
+      ing.eigen_weging && "anders gewogen", ing.controleren && "nog controleren"].filter(Boolean).join(" · ") || "geen bijzonderheden",
+  };
+  const blok = (titel, samen, inhoud, open = nieuw) => `<details class="sectie"${open ? " open" : ""}>
+    <summary><span class="s-kop">${titel}</span> <small>${esc(samen)}</small></summary><div class="s-inhoud">${inhoud}</div></details>`;
+
   main.innerHTML = `
     <a class="terug" href="#/ingredienten">← Ingrediënten</a>
     <h1 class="paginatitel">${nieuw ? "Nieuw ingrediënt" : esc(ing.naam)}</h1>
     <form class="formulier" novalidate>
-      <fieldset><legend>Algemeen</legend>
+      ${blok("Algemeen", kort.algemeen, `
         ${veld("Naam *", `<input name="naam" required value="${waarde(ing.naam)}">`,
           nieuw ? `Code: <code id="slug">–</code>` : `Code: <code>${esc(slug)}</code>`)}
         ${veld("Groep *", `<input name="groep" list="groepen" required value="${waarde(ing.groep)}">
           <datalist id="groepen">${groepen.map((g) => `<option value="${esc(g)}">`).join("")}</datalist>`)}
         ${veld("Rol *", `<select name="rol">${ROLLEN.map((r) => `<option ${r === ing.rol ? "selected" : ""}>${r}</option>`).join("")}</select>`)}
-        ${veld("Filterlabel", `<input name="tag" value="${waarde(ing.tag)}">`, "bv. 'kip' of 'tofu', voor het filteren van recepten")}
-      </fieldset>
-      <fieldset><legend>Wat je koopt</legend>
+        ${veld("Filterlabel", `<input name="tag" value="${waarde(ing.tag)}">`, "bv. 'kip' of 'tofu', voor het filteren van recepten")}`)}
+      ${blok("Wat je koopt", kort.koop, `
         ${komtUitVeld}
-        <div data-koop${ing.komt_uit ? " hidden" : ""}>${koopVelden}</div>
-      </fieldset>
-      <fieldset><legend>Voedingswaarde per 100 g</legend>
+        <div data-koop${ing.komt_uit ? " hidden" : ""}>${koopVelden}</div>`)}
+      <details class="sectie"${nieuw ? " open" : ""}><summary><span class="s-kop">Voedingswaarde per 100 g</span> <small>${esc(kort.voeding)}</small></summary><div class="s-inhoud">
         <div class="vier">
           ${veld("kcal", `<input name="kcal" type="number" step="any" min="0" value="${waarde(p.kcal)}"${geerfd("kcal")}>`)}
           ${veld("vet (g)", `<input name="vet" type="number" step="any" min="0" value="${waarde(p.vet)}"${geerfd("vet")}>`)}
@@ -221,24 +240,21 @@ export function ingredientForm(main, data, slug) {
           ${veld("eiwit (g)", `<input name="eiwit" type="number" step="any" min="0" value="${waarde(p.eiwit)}"${geerfd("eiwit")}>`)}
         </div>
         ${std && ing.per_100g == null ? `<p class="hint">Leeg = de waarden van ${esc(std.naam)} (standaardvariant).</p>` : ""}
-      </fieldset>
-      <fieldset><legend>Omrekenen</legend>
-        <div class="vier">
-          <span data-gramstuk${ing.komt_uit ? " hidden" : ""}>${veld("Gram per stuk", `<input name="stuk" type="number" step="any" min="0" value="${waarde(ing.komt_uit ? null : ing.gram_per?.stuk)}">`, "bv. 1 ui = 100")}</span>
-          ${veld("Dichtheid (g/ml)", `<input name="dichtheid" type="number" step="any" min="0" value="${waarde(ing.dichtheid)}">`, "alleen als niet ±1, bv. olie 0,92")}
-        </div>
-      </fieldset>
-      <fieldset><legend>Verpakking en bewaren</legend>
+      </div></details>
+      ${blok("Verpakking en gewicht", kort.verpakking, `
         <div class="vier">
           ${veld("Verpakking", `<select name="verpakking"><option value="">geen</option>${verpakkingen.map((x) =>
             `<option ${x === verpakking ? "selected" : ""}>${x}</option>`).join("")}</select>`, "zo koop je het, bv. blok")}
           ${veld("Gram per verpakking", `<input name="verpakking_g" type="number" step="any" min="0" value="${waarde(verpakking && ing.gram_per[verpakking])}">`, `bv. 500<span data-stuks></span>`)}
+          <span data-gramstuk${ing.komt_uit ? " hidden" : ""}>${veld("Gram per stuk", `<input name="stuk" type="number" step="any" min="0" value="${waarde(ing.komt_uit ? null : ing.gram_per?.stuk)}">`, "bv. 1 ui = 100")}</span>
+          ${veld("Dichtheid (g/ml)", `<input name="dichtheid" type="number" step="any" min="0" value="${waarde(ing.dichtheid)}">`, "alleen als niet ±1, bv. olie 0,92")}
         </div>
         <label class="vink"><input type="checkbox" name="per_stuk" ${ing.per_stuk ? "checked" : ""}> per stuk: je koopt een zak, net
           of bol, maar pakt er losse stuks uit (uien, citroenen, knoflook, aardappelen). Wat je eruit haalt
           maakt de rest niet "open": die blijft heel en even lang goed.</label>
         ${veld("Naam van één stuk", `<input name="stuknaam" value="${waarde(ing.stuknaam?.join(" / "))}" placeholder="bv. teentje / teentjes">`,
-          "alleen als 'stuks' niet duidelijk is, zoals bij knoflook (enkelvoud / meervoud)")}
+          "alleen als 'stuks' niet duidelijk is, zoals bij knoflook (enkelvoud / meervoud)")}`)}
+      ${blok("Bewaren", kort.bewaren, `
         <div class="vier">
           ${veld("Bewaren in", plekKeuze("b_plek", b.plek, groepAdvies.plek))}
           ${veld("Dicht houdbaar (dagen)", `<input name="b_dagen" type="number" step="1" min="1" value="${waarde(b.dagen)}" placeholder="${groepAdvies.dagen}">`)}
@@ -246,9 +262,8 @@ export function ingredientForm(main, data, slug) {
           ${veld("Na openen in", plekKeuze("b_open_plek", b.open_plek, groepAdvies.open_plek))}
         </div>
         <p class="hint">Leeg = het advies voor de groep. De app rekent hiermee uit wanneer iets op moet,
-          zodat je geen datums hoeft over te typen.</p>
-      </fieldset>
-      <fieldset><legend>Kenmerken</legend>
+          zodat je geen datums hoeft over te typen.</p>`)}
+      <details class="sectie"${nieuw ? " open" : ""}><summary><span class="s-kop">Kenmerken</span> <small>${esc(kort.kenmerken)}</small></summary><div class="s-inhoud">
         <label class="vink"><input type="checkbox" name="vlees" ${ing.vlees ? "checked" : ""}> vlees of vis (niet vegetarisch)</label>
         <label class="vink"><input type="checkbox" name="verwaarloosbaar" ${ing.verwaarloosbaar ? "checked" : ""}> verwaarloosbaar (kruiden, zout: telt niet mee)</label>
         <label class="vink"><input type="checkbox" name="altijd_in_huis" ${ing.altijd_in_huis ? "checked" : ""}> altijd in huis (water): nooit op de boodschappenlijst of in de voorraad</label>
@@ -256,7 +271,7 @@ export function ingredientForm(main, data, slug) {
           ${esc(naamVan(ing.soort))} (bv. incl. vocht): telt apart op de boodschappenlijst en in de voorraad</label>` : ""}
         <label class="vink"><input type="checkbox" name="controleren" ${ing.controleren ? "checked" : ""}> nog controleren</label>
         ${ing.bron ? `<p class="hint">Bron: ${esc(ing.bron)}</p>` : ""}
-      </fieldset>
+      </div></details>
       <p class="fout" hidden></p>
       <div class="knoppen"><button class="knop primair" type="submit">Opslaan</button>
         <a class="knop" href="#/ingredienten">Annuleren</a></div>

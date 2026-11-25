@@ -78,24 +78,36 @@ export function gekookt({ data, recept, porties, keuze, menuId = null, klaar }) 
 
   // Zelfgemaakte onderdelen (crispy tofu, hoemoes) die al klaarstaan: gebruiken, tenzij uitgevinkt.
   let metOnderdelen = true;
+  let lijstOpen = false; // het lijstje ingrediënten blijft open als je het opende
+  // Vinkjes die je zelf veranderde, blijven zo (ook als het aantal porties verandert).
+  const gekozen = new Map();
+  const aan = (x) => (gekozen.has(x.slug) ? gekozen.get(x.slug) : !!x.na);
   const toonVoorraad = () => {
     const v = verbruik(recept, aantal(), keuze, data, metOnderdelen);
     const kan = metOnderdelen ? v.onderdelen : verbruik(recept, aantal(), keuze, data, true).onderdelen;
+    // Ingedeeld: één regel "Uit de voorraad: ui, citroen, kikkererwten (+3) · aanpassen".
+    const namen = v.filter(aan).map((x) => x.ing.naam.toLowerCase());
     box.innerHTML = `${kan.length ? `<span class="label">Al gemaakt</span>
       <ul class="dl-lijst"><li><label class="vink"><input type="checkbox" data-onderdelen ${metOnderdelen ? "checked" : ""}>
         <span>${esc(kan.map((o) => `${data.recepten[o.recept]?.titel || o.recept} (${breuk(o.keer)}×)`).join(", "))}</span>
         <small>uit de koelkast/vriezer gebruiken</small></label></li></ul>` : ""}
-      ${v.length ? `<span class="label">Ingrediënten uit de voorraad halen</span>
+      ${v.length ? `<details class="dl-uitvoorraad"${lijstOpen ? " open" : ""}><summary>Uit de voorraad: ${esc(namen.slice(0, 3).join(", ") || "niets")}${
+        namen.length > 3 ? ` (+${namen.length - 3})` : ""} · <span class="linkknop">aanpassen</span></summary>
       <ul class="dl-lijst">${v.map((x) => `<li><label class="vink">
-        <input type="checkbox" data-slug="${esc(x.slug)}" ${x.na ? "checked" : ""}>
+        <input type="checkbox" data-slug="${esc(x.slug)}" ${aan(x) ? "checked" : ""}>
         <span>${esc(x.ing.naam)}</span>
         <small>${x.na
           ? `${esc(toonPartijen(x.voor, data))} → ${esc(toonPartijen(x.na, data))}`
-          : "is op (uit de voorraad halen)"}</small></label></li>`).join("")}</ul>` : ""}`;
+          : "is op (uit de voorraad halen)"}</small></label></li>`).join("")}</ul></details>` : ""}`;
     box.querySelector("[data-onderdelen]")?.addEventListener("change", (e) => {
       metOnderdelen = e.target.checked;
       toonVoorraad();
     });
+    box.querySelector("details")?.addEventListener("toggle", (e) => { lijstOpen = e.target.open; });
+    box.querySelectorAll("input[data-slug]").forEach((i) => i.addEventListener("change", () => {
+      gekozen.set(i.dataset.slug, i.checked);
+      toonVoorraad();
+    }));
   };
 
   toonVerdeling();

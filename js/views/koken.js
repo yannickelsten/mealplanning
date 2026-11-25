@@ -46,7 +46,7 @@ function minutenIn(tekst) {
 export function koken(main, data, id) {
   const r = data.recepten[id];
   if (!r) {
-    main.innerHTML = `<p class="leeg-tekst">Recept niet gevonden. <a href="#/">Terug</a></p>`;
+    main.innerHTML = `<p class="leeg-tekst">Recept niet gevonden. <a href="#/recepten">Terug</a></p>`;
     return;
   }
   const s = receptStaat(id, r);

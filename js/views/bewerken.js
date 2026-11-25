@@ -15,12 +15,12 @@ const receptLabel = (x) => `Recept: ${x.titel}${x.variant_van && x.ondertitel ? 
 export function bewerken(main, data, id) {
   const origineel = id ? data.recepten[id] : null;
   if (id && !origineel) {
-    main.innerHTML = `<p class="leeg-tekst">Recept niet gevonden. <a href="#/">Terug naar recepten</a></p>`;
+    main.innerHTML = `<p class="leeg-tekst">Recept niet gevonden. <a href="#/recepten">Terug naar recepten</a></p>`;
     return;
   }
   const r = structuredClone(origineel || LEEG());
   let categorie = origineel?.categorie || "overige-gerechten";
-  const terug = id ? `#/recept/${id}` : "#/";
+  const terug = id ? `#/recept/${id}` : "#/recepten";
 
   // Tekst in het koppelveld ↔ ingrediënt of recept.
   const ingOpNaam = new Map(Object.entries(data.ingredienten).map(([s, i]) => [i.naam.toLowerCase(), s]));
@@ -354,7 +354,7 @@ export function bewerken(main, data, id) {
       await verwijderRecept(origineel);
       await laad(true);
       melding("Verwijderd (staat in de prullenbak)");
-      terugNaar(origineel.variant_van ? `#/recept/${origineel.variant_van}` : "#/");
+      terugNaar(origineel.variant_van ? `#/recept/${origineel.variant_van}` : "#/recepten");
     } catch (err) {
       toonFout(esc(err.message));
     }

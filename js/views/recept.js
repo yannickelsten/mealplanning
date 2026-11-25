@@ -1,8 +1,8 @@
-import { wijzig } from "../store.js";
 import { afgeleideTags, rekenIng, voeding } from "../voeding.js";
-import { dagenTot, datumNl, esc, euro, geleden, hoeveelheid, melding, nieuwId, nl } from "../util.js";
-import { kookbeurtOpMenu, zelfGegeten } from "../planning.js";
+import { dagenTot, datumNl, esc, euro, geleden, hoeveelheid, nl, weekdag } from "../util.js";
+import { MOMENT_NAAM, dekking, kookbeurtOpMenu, momentVan, zelfGegeten } from "../planning.js";
 import { gekookt } from "./gekookt.js";
+import { inplannen } from "./menu.js";
 
 // Gekozen porties en keuze per recept, zolang de pagina open is (ook gebruikt door de kookstand).
 const staat = {};
@@ -42,7 +42,7 @@ function cijfer(label, waarde) {
 export function recept(main, data, id) {
   const r = data.recepten[id];
   if (!r) {
-    main.innerHTML = `<p class="leeg-tekst">Recept niet gevonden. <a href="#/">Terug naar recepten</a></p>`;
+    main.innerHTML = `<p class="leeg-tekst">Recept niet gevonden. <a href="#/recepten">Terug naar recepten</a></p>`;
     return;
   }
   const opties = r.keuzes?.opties || [];
@@ -63,14 +63,22 @@ export function recept(main, data, id) {
   const laatst = keerGegeten.map((m) => m.datum).sort().at(-1);
   const bewaard = data.voorraad.porties.filter((p) => p.recept === id);
   const eenheid = (n) => (r.porties ? (n === 1 ? "portie" : "porties") : "×");
+  // Al gepland? Dan zeggen wanneer ("✓ do lunch").
+  const gepland = data.menu.gerechten.filter((g) => g.recept === id && !g.gegeten && g.dag).sort((a, b) => a.dag.localeCompare(b.dag))[0];
+  // Wat je ervan in huis hebt, voor dit aantal porties (alleen als je een voorraad bijhoudt).
+  const dek = data.voorraad.ingredienten.length ? dekking(r, data, s.porties, s.keuze) : null;
+  const inHuis = !dek || !dek.totaal ? ""
+    : `<p class="in-huis">${dek.ontbreekt.length ? `<b>Nog kopen:</b> ${esc(dek.ontbreekt.slice(0, 4).join(", ").toLowerCase())}${
+      dek.ontbreekt.length > 4 ? ` en nog ${dek.ontbreekt.length - 4}` : ""}` : "✓ Alles in huis"}${
+      dek.gauw.length ? ` · <span class="rk-gauw">gebruikt ${esc(dek.gauw.map((x) => x.naam.toLowerCase()).join(", "))} (gauw op)</span>` : ""}</p>`;
 
   main.innerHTML = `
     <div class="actiebalk">
-      <a class="terug" href="#/">← Recepten</a>
+      <a class="terug" href="#/recepten">← Recepten</a>
       <span class="acties">
         <a class="knop klein primair" href="#/recept/${esc(id)}/koken">Koken</a>
-        ${opMenu ? `<a class="knop klein" href="#/menu">✓ Op het menu</a>`
-          : `<button class="knop klein" data-plan>+ Op het menu</button>`}
+        ${opMenu ? `<a class="knop klein" href="#/" title="Staat op het menu">✓ ${gepland ? esc(`${weekdag(gepland.dag)} ${MOMENT_NAAM[momentVan(gepland, data)].toLowerCase()}`) : "Op het menu"}</a>`
+          : `<button class="knop klein" data-plan title="Kies een dag en maaltijd">Inplannen</button>`}
         <button class="knop klein" data-gekookt>Gekookt…</button>
         <a class="knop klein alleen-laptop" href="#/recept/${esc(id)}/bewerken">Bewerken</a>
       </span>
@@ -109,6 +117,7 @@ export function recept(main, data, id) {
       <section class="bereiding">
         <div class="kol-ingr">
           <h2 class="label">Ingrediënten</h2>
+          ${inHuis}
           <ul class="ingr">${r.stappen.map((st, i) => (st.ingredienten || [])
             .map((x, j) => regelHtml(x, data, factor,
               ` data-stap="${i}"${j === 0 && i > 0 ? ` class="groepstart"` : ""}`)).join("")).join("")}</ul>
@@ -139,15 +148,9 @@ export function recept(main, data, id) {
       ${r.bron?.canva ? `<div class="meta-rij"><a href="https://www.canva.com/design/${esc(r.bron.canva)}/view" target="_blank" rel="noopener">Origineel in Canva ↗</a></div>` : ""}
     </section>`;
 
-  main.querySelector("[data-plan]")?.addEventListener("click", (e) => {
-    e.target.disabled = true;
-    wijzig("menu", (doc) => {
-      doc.gerechten.push({ id: nieuwId(), recept: id, porties: s.porties, ...(s.keuze ? { keuze: s.keuze } : {}) });
-    }).then((d) => { melding("Op het menu gezet"); recept(main, d, id); }, (err) => {
-      melding(err.message);
-      e.target.disabled = false;
-    });
-  });
+  // Inplannen: "Wanneer?" (het eerste vrije moment staat al gekozen), dan op het menu.
+  main.querySelector("[data-plan]")?.addEventListener("click", () =>
+    inplannen(data, r, (d) => recept(main, d, id), { porties: s.porties, keuze: s.keuze }));
   main.querySelector("[data-gekookt]").addEventListener("click", () => gekookt({
     data, recept: r, porties: s.porties, keuze: s.keuze, menuId: kookbeurt?.id,
     klaar: (d) => recept(main, d, id),
