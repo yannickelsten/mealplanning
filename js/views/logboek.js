@@ -4,6 +4,7 @@ import { wijzig } from "../store.js";
 import { benodigd, kookbeurtOpMenu, rond, toonHoeveelheid, voedingPerDag } from "../planning.js";
 import { datumNl, esc, melding, nl, plusDagen, vandaag } from "../util.js";
 import { gekookt } from "./gekookt.js";
+import { ikoon } from "../iconen.js";
 
 const f = { periode: 14, logAlles: false };
 const fout = (err) => melding(err.message);
@@ -97,8 +98,7 @@ export function logboek(main, data) {
         ${grafiek("Energie", "kcal", perDag, "kcal", doelen.kcal)}
         ${grafiek("Eiwit", "g", perDag, "eiwit", doelen.eiwit)}
       </div>
-      <p class="hint">Alleen wat je zelf at en in het logboek staat (porties van recepten). Ontbijt, lunch
-        en snacks tellen mee als je ze logt. Oude regels van vóór 15 nov tellen als 1 portie.</p>
+      <p class="hint" title="Porties van recepten die je zelf at. Ontbijt, lunch en snacks tellen mee als je ze logt. Regels van vóór 15 nov tellen als 1 portie.">Alleen wat je zelf at en logde.</p>
       <form class="doelen">
         <span class="label">Doel per dag</span>
         <label class="veld"><span>kcal</span><input name="kcal" type="number" min="0" step="10" value="${doelen.kcal ?? ""}"></label>
@@ -110,14 +110,14 @@ export function logboek(main, data) {
     <section class="blokje">
       <h2 class="kop2">Gekookt en gegeten</h2>
       <div class="log-toevoegen">
-        <select id="log-recept" aria-label="Recept"><option value="">Iets gekookt dat niet op het menu stond? Kies een recept…</option>
+        <select id="log-recept" aria-label="Recept"><option value="">Iets anders gekookt? Kies een recept…</option>
           ${data.categorieen.map((c) => {
             const rs = Object.values(data.recepten).filter((r) => r.categorie === c.id)
               .sort((a, b) => a.titel.localeCompare(b.titel, "nl") || (a.variant_van ? 1 : -1));
             return rs.length ? `<optgroup label="${esc(c.naam)}">${rs.map((r) =>
               `<option value="${esc(r.id)}">${esc(r.titel)}${r.variant_van && r.ondertitel ? ` (${esc(r.ondertitel)})` : ""}</option>`).join("")}</optgroup>` : "";
           }).join("")}</select>
-        <button class="knop" id="log-knop">Gekookt…</button>
+        <button class="knop" id="log-knop">${ikoon("check")}Gekookt…</button>
       </div>
       ${log.length ? `<ul class="loglijst">${logZichtbaar.map((m) => {
         const r = data.recepten[m.recept];
@@ -134,7 +134,7 @@ export function logboek(main, data) {
           <span class="log-wat">${r ? `<a href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>${r.variant_van && r.ondertitel ? ` <small>${esc(r.ondertitel)}</small>` : ""}`
             : `<span>${esc(m.recept)}</span> <small>(recept bestaat niet meer)</small>`}
           ${wat ? `<small>${esc(wat)}</small>` : ""}</span>
-          <button class="kruisje" data-logweg aria-label="Uit het logboek halen" title="Uit het logboek halen">×</button></li>`;
+          <button class="ikoonknop stil" data-logweg aria-label="Uit het logboek halen" title="Uit het logboek halen">${ikoon("trash-2")}</button></li>`;
       }).join("")}</ul>
         ${log.length > logZichtbaar.length ? `<button class="chip leeg" data-logalles>Alles tonen (${log.length})</button>` : ""}`
         : `<p class="leeg-tekst">Nog niets gelogd. Klik na het koken op "Gekookt", dan weet de app wat je lang niet hebt gehad.</p>`}
@@ -145,13 +145,12 @@ export function logboek(main, data) {
       <h3 class="subkop">Gebruikt bij het koken <small class="hint">laatste ${f.periode} dagen, uit de recepten berekend</small></h3>
       ${gebruikt.length ? `<ul class="verbruik">${gebruikt.map((x) => `<li title="${esc([...x.recepten].join(", "))}">
           <span>${esc(x.ing.naam)}</span>
-          <small>${x.nodig.length ? esc(toonHoeveelheid(x.nodig.map((q) => ({ ...q, hoeveelheid: rond(q.hoeveelheid, q.eenheid, data.eenheden) })), data.eenheden, x.ing)) : ""}${x.keer > 1 ? ` · ${x.keer}×` : ""}</small></li>`).join("")}</ul>
-        <p class="hint">Hiermee schat de app ook wanneer iets dat "in huis" is (olie, sauzen, kruiden) bijna op is.</p>`
+          <small>${x.nodig.length ? esc(toonHoeveelheid(x.nodig.map((q) => ({ ...q, hoeveelheid: rond(q.hoeveelheid, q.eenheid, data.eenheden) })), data.eenheden, x.ing)) : ""}${x.keer > 1 ? ` · ${x.keer}×` : ""}</small></li>`).join("")}</ul>`
         : `<p class="leeg-tekst">In deze periode niets gekookt.</p>`}
       <h3 class="subkop">Op <small class="hint">laatste 3 maanden</small></h3>
       ${opgemaakt.length ? `<ul class="loglijst">${opgemaakt.slice(0, 20).map((o) => `<li data-op="${esc(o.id)}"><time>${esc(datumNl(o.datum))}</time>
           <span class="log-soort">op</span><span class="log-wat">${esc(ingNaam(o.ingredient))}${o.niet_kopen ? " <small>niet opnieuw kopen</small>" : ""}</span>
-          <button class="kruisje" data-opweg aria-label="Uit het logboek halen" title="Uit het logboek halen">×</button></li>`).join("")}</ul>`
+          <button class="ikoonknop stil" data-opweg aria-label="Uit het logboek halen" title="Uit het logboek halen">${ikoon("trash-2")}</button></li>`).join("")}</ul>`
         : `<p class="leeg-tekst">Nog niets. Is iets op, klik dan op "Op" bij <a href="#/voorraad">Voorraad</a>: dan komt het ook op de boodschappenlijst.</p>`}
       <h3 class="subkop">Weggegooid <small class="hint">laatste 3 maanden</small></h3>
       ${weg.length ? `${vaakst.some(([, n]) => n > 1) ? `<p>Het vaakst: ${vaakst.filter(([, n]) => n > 1).map(([naam, n]) => `${esc(naam)} (${n}×)`).join(", ")}.</p>` : ""}
@@ -159,7 +158,7 @@ export function logboek(main, data) {
           <span class="log-soort">${w.recept ? "portie" : "ingrediënt"}</span>
           <span class="log-wat">${esc(wegNaam(w))}
             <small>${w.aantal ? esc(porties(w.aantal, data.recepten[w.recept])) : w.hoeveelheid != null ? `${nl(w.hoeveelheid, 2)} ${esc(w.eenheid)}` : ""}</small></span>
-          <button class="kruisje" data-wegweg aria-label="Uit het logboek halen" title="Uit het logboek halen">×</button></li>`).join("")}</ul>`
+          <button class="ikoonknop stil" data-wegweg aria-label="Uit het logboek halen" title="Uit het logboek halen">${ikoon("trash-2")}</button></li>`).join("")}</ul>`
         : `<p class="leeg-tekst">Niets weggegooid, of nog niet bijgehouden. Gooi je iets weg, gebruik dan het × bij
           <a href="#/voorraad">Voorraad</a> (en niet "Op"), dan zie je hier wat er vaak bederft.</p>`}
     </section>`;

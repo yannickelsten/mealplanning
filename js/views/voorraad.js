@@ -2,12 +2,14 @@ import { bewaarIngredient, laad, wijzig } from "../store.js";
 import { gram } from "../voeding.js";
 import { aansnijdbaar, BIJNA_OP, bewaren, bijnaOp, eersteOptie, gauwOp, geschatGebruikt, ingVan, minimumVan, openen, opTegen, perStuk,
   PLEKKEN, rond, soortVan, standaardPlek, toonPartij, toonPartijen, verpakkingOpties, voorraadEenheden } from "../planning.js";
-import { dagenTot, datumNl, esc, houdbaar, melding, nieuwId, vandaag } from "../util.js";
+import { dagenTot, datumNl, esc, melding, nieuwId, vandaag } from "../util.js";
+import { ikoon } from "../iconen.js";
 import { aantalPorties, koppelPorties, oudePorties, portiesHtml } from "./porties.js";
 
 const f = { zoek: "" };
 const fout = (err) => melding(err.message);
 const PLEKNAAM = Object.fromEntries(PLEKKEN);
+const PLEK_IKOON = { koelkast: "refrigerator", vriezer: "snowflake", kast: "archive" };
 
 // Ingrediënten waarvan de naam met de tekst begint ("melk" → "Melk (halfvol)", niet "Kokosmelk").
 function kandidaten(data, t) {
@@ -37,8 +39,8 @@ function opBadge(p, data) {
   if (!datum) return "";
   const n = dagenTot(datum);
   if (n > 14) return "";
-  const tekst = n < 0 ? "over de datum" : n === 0 ? "vandaag op" : n === 1 ? "morgen op" : `nog ${n} dagen`;
-  return `<span class="badge${n <= 3 ? " waarsch" : ""}" title="Op voor ${esc(datumNl(datum))}${p.tht ? " (tht)" : " (bewaaradvies)"}">${tekst}</span>`;
+  const tekst = n < 0 ? "over datum" : n === 0 ? "vandaag" : n === 1 ? "morgen" : `${n} d`;
+  return `<span class="badge${n <= 3 ? " waarsch" : ""}" title="Op voor ${esc(datumNl(datum))}${p.tht ? " (tht)" : " (bewaaradvies)"}">${ikoon("clock")}${tekst}</span>`;
 }
 
 // "in huis", met een schatting hoeveel er nog is als je er al mee gekookt hebt. "bijna op?"
@@ -46,7 +48,7 @@ function opBadge(p, data) {
 function inHuisTekst(p, data) {
   const g = geschatGebruikt(p, data);
   const titel = "Geschat uit wat je sinds het kopen gekookt hebt";
-  if (bijnaOp([p], data) != null) return `<span class="badge waarsch" title="${titel}">bijna op?</span>`;
+  if (bijnaOp([p], data) != null) return `<span class="badge waarsch" title="${titel}">${ikoon("circle-help")}bijna op?</span>`;
   if (g == null || g < 0.1 || g >= BIJNA_OP) return `<small>in huis</small>`;
   return `<small title="${titel}">in huis · nog ±${Math.max(0, 100 - Math.round(g * 10) * 10)}%</small>`;
 }
@@ -93,9 +95,9 @@ function openKnop(p, data) {
   if (p.geopend || p.hoeveelheid == null || !ing) return "";
   if (perStuk(ing)) {
     return aansnijdbaar(p, ing, data.eenheden)
-      ? `<button class="knop klein" data-open title="Eén stuk aansnijden; de rest blijft heel">Aansnijden</button>` : "";
+      ? `<button class="ikoonknop" data-open title="Eén aansnijden (de rest blijft heel)" aria-label="Aansnijden">${ikoon("scissors")}</button>` : "";
   }
-  return `<button class="knop klein" data-open title="Een verpakking openen">Open</button>`;
+  return `<button class="ikoonknop" data-open title="Openen" aria-label="Openen">${ikoon("package-open")}</button>`;
 }
 
 export function voorraad(main, data) {
@@ -113,26 +115,27 @@ export function voorraad(main, data) {
 
   main.innerHTML = `
     <div class="kopregel"><h1 class="paginatitel">Voorraad</h1>
-      <button class="knop primair" id="nieuw">+ Toevoegen</button></div>
-    ${heeftIets ? `<div class="zoekbalk"><input type="search" id="zoek" placeholder="Zoek in voorraad…" value="${esc(f.zoek)}" autocomplete="off"></div>` : ""}
+      <button class="knop primair" id="nieuw">${ikoon("plus")}Toevoegen</button></div>
+    ${heeftIets ? `<div class="zoekbalk"><label class="zoekveld">${ikoon("search")}<input type="search" id="zoek" placeholder="Zoeken…" aria-label="Zoek in voorraad" value="${esc(f.zoek)}" autocomplete="off"></label></div>
+      <p class="legenda"><span>${ikoon("package-open")} open</span><span>${ikoon("circle-check")} op</span><span>${ikoon("trash-2")} weggegooid</span>
+        <span>${ikoon("utensils")} gegeten</span><span>${ikoon("snowflake")} naar vriezer</span></p>` : ""}
     <div id="lijst"></div>`;
 
-  // Eén partij als rij (met zijn knoppen). `metPlek`: de plek erbij (in de groep "Gauw op").
+  // Eén partij als één regel: naam · hoeveel (met "open") · houdbaar · knoppen. Wanneer gekocht of
+  // geopend staat in het venster dat opent als je op de regel tikt. `metPlek`: plek-icoon erbij ("Gauw op").
   const partijRij = ({ p, ing }, metPlek = false) => {
     const onbekendGewicht = p.eenheid && ing && gram({ hoeveelheid: 1, eenheid: p.eenheid }, ingVan(data, p.ingredient), e) == null;
-    const wanneer = [metPlek && PLEKNAAM[p.plek].toLowerCase(), p.geopend ? `open sinds ${datumNl(p.geopend)}` : p.gekocht ? `gekocht ${datumNl(p.gekocht)}` : ""]
-      .filter(Boolean).join(" · ");
-    return `<li data-id="${esc(p.id)}" tabindex="0">
-      <span class="v-naam">${esc(ing?.naam || p.ingredient)}
+    const wanneer = p.geopend ? `open sinds ${datumNl(p.geopend)}` : p.gekocht ? `gekocht ${datumNl(p.gekocht)}` : "";
+    return `<li data-id="${esc(p.id)}" tabindex="0"${wanneer ? ` title="${esc(wanneer)}"` : ""}>
+      <span class="v-naam">${metPlek ? `<span class="v-plek" title="${PLEKNAAM[p.plek]}">${ikoon(PLEK_IKOON[p.plek])}</span>` : ""}${esc(ing?.naam || p.ingredient)}
         ${ing ? "" : `<span class="badge waarsch">onbekend ingrediënt</span>`}
-        ${onbekendGewicht ? `<span class="badge waarsch" title="Klik om het gewicht in te vullen">gewicht per ${esc(p.eenheid)}?</span>` : ""}
-        ${wanneer ? `<small>${esc(wanneer)}</small>` : ""}</span>
-      <span class="v-hv">${p.hoeveelheid != null ? esc(toonPartij({ ...p, geopend: null }, data)) : inHuisTekst(p, data)}</span>
+        ${onbekendGewicht ? `<span class="badge waarsch" title="Tik om het gewicht in te vullen">gewicht per ${esc(p.eenheid)}?</span>` : ""}</span>
+      <span class="v-hv">${p.hoeveelheid != null ? esc(toonPartij(p, data)) : inHuisTekst(p, data)}</span>
       <span class="v-tht">${opBadge(p, data)}</span>
       <span class="v-acties">
         ${openKnop(p, data)}
-        <button class="knop klein" data-op title="Op: opgebruikt">Op</button>
-        <button class="kruisje" data-weg aria-label="Weggegooid" title="Weggegooid (bederf)">×</button>
+        <button class="ikoonknop" data-op title="Op (komt op de boodschappenlijst)" aria-label="Op">${ikoon("circle-check")}</button>
+        <button class="ikoonknop gevaar" data-weg title="Weggegooid" aria-label="Weggegooid">${ikoon("trash-2")}</button>
       </span>
     </li>`;
   };
@@ -143,10 +146,10 @@ export function voorraad(main, data) {
     const soort = soortVan(data, xs[0].p.ingredient);
     const vroegst = xs.map(({ p }) => p).filter((p) => opTegen(p, data)).sort((a, b) => opTegen(a, data).localeCompare(opTegen(b, data)))[0];
     return `<li class="v-groep" data-groep="${esc(soort)}" tabindex="0" aria-expanded="false">
-      <span class="v-naam">${esc(data.ingredienten[soort]?.naam || soort)} <small>${xs.length} partijen · tik om te zien</small></span>
+      <span class="v-naam">${esc(data.ingredienten[soort]?.naam || soort)} <span class="badge" title="${xs.length} partijen: tik om ze te zien">${xs.length}×</span></span>
       <span class="v-hv">${esc(toonPartijen(xs.map(({ p }) => p), data))}</span>
       <span class="v-tht">${vroegst ? opBadge(vroegst, data) : ""}</span>
-      <span class="v-acties"><span class="v-pijl" aria-hidden="true">▾</span></span>
+      <span class="v-acties"><span class="v-pijl" aria-hidden="true">${ikoon("chevron-down")}</span></span>
     </li><li class="v-sub" hidden><ul class="vlijst">${xs.map((x) => partijRij(x)).join("")}</ul></li>`;
   };
 
@@ -165,10 +168,10 @@ export function voorraad(main, data) {
     const gauwLijst = zichtbaar.filter((x) => gauwIds.has(x.p.id)).sort((a, b) => opTegen(a.p, data).localeCompare(opTegen(b.p, data)));
     const gauwPorties = portiesHtml(data, { zoek: f.zoek, filter: (p) => oudIds.has(p.id) });
     const gauwVak = gauwLijst.length || gauwPorties ? `<section class="plekvak gauw">
-      <h2 class="plekkop">Gauw op <small>eerst opmaken</small></h2>
+      <h2 class="plekkop met-ik">${ikoon("triangle-alert")}Gauw op
+        ${gauwLijst.length ? `<a class="knop klein" href="#/menu/voorraad">${ikoon("book-open")}Recepten hiermee</a>` : ""}</h2>
       ${gauwPorties}
       ${gauwLijst.length ? `<ul class="vlijst">${gauwLijst.map((x) => partijRij(x, true)).join("")}</ul>` : ""}
-      ${gauwLijst.length ? `<p class="hint"><a href="#/menu/voorraad">Recepten die dit gebruiken →</a></p>` : ""}
     </section>` : "";
     // Per plek één vak: eerst wat je zelf gekookt hebt, dan de ingrediënten (per soort), en wat
     // zonder hoeveelheid "in huis" is (kruiden, olie…) op één regel.
@@ -183,14 +186,13 @@ export function voorraad(main, data) {
       }
       const porties = plek === "kast" ? "" : portiesHtml(data, { plek, zoek: f.zoek, filter: (p) => !oudIds.has(p.id) && zoekt(p) });
       if (z && !hier.length && !porties) return "";
-      const telling = [porties && "zelfgekookt", hier.length && `${hier.length} ${hier.length === 1 ? "ingrediënt" : "ingrediënten"}`].filter(Boolean).join(" · ");
       return `<section class="plekvak ${plek}">
-        <h2 class="plekkop">${naam} <small>${telling || "leeg"}</small></h2>
+        <h2 class="plekkop met-ik">${ikoon(PLEK_IKOON[plek])}${naam} <small>${hier.length || ""}</small></h2>
         ${porties ? `<h3 class="subkop">Zelfgekookt</h3>${porties}` : ""}
         ${rijen.length ? `${porties ? `<h3 class="subkop">Ingrediënten</h3>` : ""}<ul class="vlijst">${[...groepen.values()].map(groepRij).join("")}</ul>` : ""}
         ${inHuis.length ? `<p class="ook-in-huis"><span class="label">Ook in huis</span> ${inHuis.map(({ p, ing }) =>
           `<button type="button" class="linkknop" data-partij="${esc(p.id)}" title="Aanpassen, op of weg">${esc(ing?.naam || p.ingredient)}</button>`).join(", ")}</p>` : ""}
-        ${!porties && !hier.length ? `<p class="plek-leeg">Niets in de ${naam.toLowerCase()}.</p>` : ""}
+        ${!porties && !hier.length ? `<p class="plek-leeg">Leeg.</p>` : ""}
       </section>`;
     }).join("");
     lijst.innerHTML = gauwVak + vakken || `<p class="leeg-tekst">Niets gevonden.</p>`;
@@ -274,7 +276,7 @@ function partijDialoog(data, p, klaar) {
     ${p ? "" : `<label class="veld"><span>Ingrediënt</span>
       <input name="ingredient" list="v-ingredienten" autocomplete="off" required>
       ${ingredientKeuzelijst(data, "v-ingredienten")}
-      <small>Staat het er niet bij? Maak het eerst aan bij <a href="#/ingredient/nieuw">Ingrediënten</a>.</small></label>`}
+      <small>Niet in de lijst? <a href="#/ingredient/nieuw">Nieuw ingrediënt</a></small></label>`}
     <div class="twee">
       <label class="veld"><span>Hoeveel</span><input name="hoeveelheid" type="number" step="any" min="0"
         value="${p?.hoeveelheid ?? ""}" placeholder="leeg = genoeg"></label>
@@ -282,8 +284,8 @@ function partijDialoog(data, p, klaar) {
     </div>
     <label class="veld" data-gewicht hidden><span></span>
       <input name="gewicht" type="number" step="any" min="0" placeholder="bv. 500">
-      <small>Wordt bij het ingrediënt bewaard, zodat de app stuks/verpakkingen kan omrekenen naar recepten.
-        <span data-uitlek hidden>Bij blikken en potten: het uitlekgewicht, zoals in recepten.</span></small></label>
+      <small>Wordt onthouden bij het ingrediënt.
+        <span data-uitlek hidden>Blik of pot: het uitlekgewicht.</span></small></label>
     <p class="hint" data-advies></p>
     <details class="dl-meer"${p ? " open" : ""}><summary>Meer: waar, datums, vaste voorraad</summary>
       <div class="twee">

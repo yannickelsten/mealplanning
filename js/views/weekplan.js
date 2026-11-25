@@ -4,7 +4,8 @@
 // gewoon opnieuw getekend worden.
 import { wijzig } from "../store.js";
 import { MOMENTEN, boodschappenlijst, stelPlanVoor } from "../planning.js";
-import { dagenTot, datumNl, esc, melding, nieuwId, plusDagen, vandaag, weekdag } from "../util.js";
+import { dagenTot, datumNl, esc, melding, nieuwId, plusDagen, vandaag } from "../util.js";
+import { ikoon } from "../iconen.js";
 
 let voorstel = null; // {opties, ronde, items, uitgesloten}
 let aanroepen = 0;
@@ -68,14 +69,13 @@ export function planDialoog(data, klaar) {
   dlg.className = "dialoog";
   dlg.innerHTML = `<form novalidate>
     <h2 class="dl-kop">Weekplan voorstellen</h2>
-    <p class="hint">Wat al op het menu staat blijft staan; alleen de lege vakken worden ingevuld. Er komt
-      pas iets op het menu als je het voorstel goedkeurt.</p>
+    <p class="hint">Vult alleen lege vakken. Er komt pas iets op het menu als je het goedkeurt.</p>
     <div class="twee">
       <label class="veld"><span>Vanaf</span><input type="date" name="begin" value="${vandaag()}" min="${vandaag()}"></label>
       <label class="veld"><span>Aantal dagen</span><input type="number" name="dagen" min="1" max="14" step="1" value="${p.dagen}"></label>
     </div>
     <label class="veld"><span>Met hoeveel mensen eet je?</span><input type="number" name="eters" min="1" max="12" step="1" value="${p.eters}">
-      <small>Zoveel porties per maaltijd. Wat er bij het koken overblijft, komt de dagen erna terug als lunch of avondeten.</small></label>
+      <small>Porties per maaltijd; wat overblijft wordt een rest de dagen erna.</small></label>
     <fieldset class="keuzerij"><legend>Welke maaltijden invullen?</legend>
       ${MOMENTEN.map(([m, naam]) => `<label class="vink"><input type="checkbox" name="moment" value="${m}" ${p.momenten.includes(m) ? "checked" : ""}> ${naam}</label>`).join("")}
     </fieldset>
@@ -117,28 +117,28 @@ export function planDialoog(data, klaar) {
 export function voorstelTegel(i, data) {
   const r = data.recepten[i.recept];
   if (!r) return "";
-  const n = (x) => `${x} ${x === 1 ? "portie" : "porties"}`;
+  // Kort met iconen; de redenen ("lang niet gegeten, alles in huis…") in de tooltip.
   let meta;
-  if (i.uit) meta = `uit de koelkast · ${n(i.porties)}`;
-  else if (i.van) meta = `rest van ${weekdag(kookVan(i)?.dag || i.dag)}${i.porties !== 1 ? ` · ${n(i.porties)}` : ""}`;
+  if (i.uit) meta = `${ikoon("refrigerator")}${i.porties}`;
+  else if (i.van) meta = `${ikoon("corner-down-right")}rest ${esc(datumNl(kookVan(i)?.dag || i.dag).split(" ")[0])}${i.porties !== 1 ? ` · ${i.porties}` : ""}`;
   else {
     const later = voorstel.items.filter((x) => x.van === i.tid && actief(x)).reduce((s, x) => s + x.porties, 0);
     const vriezer = i.porties - i.eten - later;
-    meta = [`${n(i.porties)} koken`, (later || vriezer) && `${i.eten} nu`, later && `${later} later`,
-      vriezer && `${vriezer} naar de vriezer`].filter(Boolean).join(" · ");
+    meta = `${ikoon("cooking-pot")}${i.porties}${later || vriezer ? ` · ${[`${i.eten} nu`, later && `${later} later`, vriezer && `${vriezer} vriezer`].filter(Boolean).join(", ")}` : ""}`;
   }
   const aan = actief(i);
+  const waarom = i.redenen?.length ? i.redenen.join("\n") : "";
   return `<div class="wr-gerecht voorstel${aan ? "" : " af"}" data-tid="${esc(i.tid)}">
     <span class="wr-voorsteltag">${aan ? "voorstel" : "hier eet ik niet"}</span>
-    <a class="wr-titel" href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>
-    <small class="wr-meta">${esc(meta)}</small>
-    ${i.redenen?.length && aan ? `<small class="wr-reden">${esc(i.redenen.join(" · "))}</small>` : ""}
-    <span class="wr-keuze">
-      <span class="janee" role="group" aria-label="Nemen?">
-        <button type="button" class="mini" data-ja aria-pressed="${i.aan}" title="Nemen">✓</button><button type="button" class="mini" data-nee aria-pressed="${!i.aan}" title="Hier eet ik niet">✗</button>
+    <a class="wr-titel" href="#/recept/${esc(r.id)}"${waarom ? ` title="${esc(waarom)}"` : ""}>${esc(r.titel)}</a>
+    <div class="wr-onder">
+      <small class="wr-meta"${waarom ? ` title="${esc(waarom)}"` : ""}>${meta}</small>
+      <span class="wr-knoppen">
+        <button type="button" class="ikoonknop${i.aan ? " gekozen" : ""}" data-ja aria-pressed="${i.aan}" title="Nemen" aria-label="Nemen">${ikoon("check")}</button>
+        <button type="button" class="ikoonknop${i.aan ? "" : " gekozen nee"}" data-nee aria-pressed="${!i.aan}" title="Hier eet ik niet" aria-label="Hier eet ik niet">${ikoon("x")}</button>
+        ${i.uit || !aan ? "" : `<button type="button" class="ikoonknop stil" data-ander title="Ander gerecht" aria-label="Ander gerecht">${ikoon("refresh-cw")}</button>`}
       </span>
-      ${i.uit || !aan ? "" : `<button type="button" class="knop klein" data-ander>Ander gerecht</button>`}
-    </span>
+    </div>
   </div>`;
 }
 
@@ -152,14 +152,12 @@ export function voorstelBalk(data, laatsteDag) {
   const verder = items.some((i) => i.dag > laatsteDag);
   const eind = plusDagen(opties.begin, opties.dagen - 1);
   return `<div class="voorstelbalk">
-    <p><b>Voorstel ${esc(datumNl(opties.begin))} – ${esc(datumNl(eind))}</b>: ${aan.length} van ${items.length} maaltijden,
-      ${koken}× koken${aan.length ? ` · daarna ${teKopen} ${teKopen === 1 ? "ding" : "dingen"} op de boodschappenlijst` : ""}.</p>
-    <p class="hint">Gestippeld = voorstel, er staat nog niets op het menu. Kies ✗ waar je niet eet (dat vak
-      blijft leeg; resten die ervan afhingen worden opnieuw ingevuld), of "Ander gerecht" voor iets
-      anders.${verder ? " Een deel staat verder in de tijd: kijk met ›." : ""}</p>
+    <p title="Gestippeld = voorstel: er staat nog niets op het menu. ✗ = hier eet ik niet (resten die ervan afhingen worden opnieuw ingevuld); ↻ = ander gerecht.">
+      ${ikoon("sparkles")} <b>Voorstel ${esc(datumNl(opties.begin))} – ${esc(datumNl(eind))}</b>: ${aan.length} van ${items.length} maaltijden,
+      ${koken}× koken${aan.length ? `, ${teKopen} ${teKopen === 1 ? "ding" : "dingen"} kopen` : ""}${verder ? " · meer met ›" : ""}</p>
     <div class="knoppen">
-      <button class="knop primair" type="button" data-accepteer ${aan.length ? "" : "disabled"}>Aangevinkte op het menu zetten</button>
-      <button class="knop" type="button" data-opnieuw>Opnieuw voorstellen</button>
+      <button class="knop primair" type="button" data-accepteer ${aan.length ? "" : "disabled"}>${ikoon("check")}Op het menu zetten</button>
+      <button class="knop" type="button" data-opnieuw>${ikoon("refresh-cw")}Opnieuw</button>
       <button class="knop" type="button" data-stoppen>Annuleren</button>
     </div>
   </div>`;

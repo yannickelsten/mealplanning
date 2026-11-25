@@ -3,6 +3,7 @@
 import { wijzig } from "../store.js";
 import { BEWAARDAGEN, bewaardePorties, portieStatus } from "../planning.js";
 import { breuk, datumNl, duur, esc, melding, nieuwId, vandaag } from "../util.js";
+import { ikoon } from "../iconen.js";
 
 const fout = (err) => melding(err.message);
 const naar = (plek) => (plek === "koelkast" ? "vriezer" : "koelkast");
@@ -17,12 +18,14 @@ function aantalTekst(data, p) {
   return `${breuk(p.aantal)} ${p.aantal === 1 ? "portie" : "porties"}`;
 }
 
+// Hoe lang al bewaard, kort ("3 d"); de hele zin in de tooltip.
 function leeftijd(p) {
   const s = portieStatus(p);
-  const tekst = p.plek === "koelkast"
+  const lang = p.plek === "koelkast"
     ? (s.oud ? `al ${duur(s.dagen)} in de koelkast: op of weg?` : s.dagen ? `${duur(s.dagen)} in de koelkast` : "vandaag in de koelkast")
     : (s.oud ? `al ${duur(s.dagen)} in de vriezer` : s.dagen ? `${duur(s.dagen)} in de vriezer` : "vandaag ingevroren");
-  return `<span class="badge${s.oud ? " waarsch" : ""}">${esc(tekst)}</span>`;
+  const kort = s.dagen ? duur(s.dagen).replace(/ dagen?$/, " d").replace(/ weken$/, " wk").replace(/ maanden$/, " mnd") : "vandaag";
+  return `<span class="badge${s.oud ? " waarsch" : ""}" title="${esc(lang)}">${ikoon(p.plek === "vriezer" ? "snowflake" : "refrigerator")}${esc(kort)}</span>`;
 }
 
 // Aantal bewaarde porties op een plek als tekst: "3 porties".
@@ -49,16 +52,17 @@ export function portiesHtml(data, { plek = null, zoek = "", recept = null, filte
     const r = data.recepten[p.recept];
     const keuze = r?.keuzes?.opties?.find((o) => o.id === p.keuze)?.naam;
     const verhuisd = p.sinds !== p.gekookt;
-    return `<li data-portie="${esc(p.id)}">
+    const eet = r && !r.porties ? "Op" : "Gegeten";
+    return `<li data-portie="${esc(p.id)}" title="${esc(`gekookt ${datumNl(p.gekookt)}${verhuisd ? `, sinds ${datumNl(p.sinds)} in de ${p.plek}` : ""}`)}">
       <div class="pl-naam">
         ${r ? `<a href="#/recept/${esc(p.recept)}">${esc(r.titel)}</a>` : esc(p.recept)}
-        <small>${[keuze, aantalTekst(data, p), `gekookt ${datumNl(p.gekookt)}`].filter(Boolean).map(esc).join(" · ")}</small>
+        <small>${[keuze, aantalTekst(data, p)].filter(Boolean).map(esc).join(" · ")}</small>
       </div>
-      <span class="pl-leeftijd">${leeftijd(p)}${verhuisd ? `<small>sinds ${esc(datumNl(p.sinds))}</small>` : ""}</span>
+      <span class="pl-leeftijd">${leeftijd(p)}</span>
       <span class="pl-acties">
-        <button class="knop klein" data-actie="eten">${r && !r.porties ? "Op" : "Gegeten"}</button>
-        <button class="knop klein" data-actie="verplaats">Naar ${naar(p.plek)}</button>
-        <button class="kruisje" data-actie="weg" aria-label="Weggegooid" title="Weggegooid">×</button>
+        <button class="ikoonknop" data-actie="eten" title="${eet}" aria-label="${eet}">${ikoon(r && !r.porties ? "circle-check" : "utensils")}</button>
+        <button class="ikoonknop" data-actie="verplaats" title="Naar de ${naar(p.plek)}" aria-label="Naar de ${naar(p.plek)}">${ikoon(naar(p.plek) === "vriezer" ? "snowflake" : "refrigerator")}</button>
+        <button class="ikoonknop gevaar" data-actie="weg" aria-label="Weggegooid" title="Weggegooid">${ikoon("trash-2")}</button>
       </span>
     </li>`;
   }).join("")}</ul>`;

@@ -8,6 +8,7 @@ import { gekookt } from "./gekookt.js";
 import { koppelPorties, portieActie, portiesHtml } from "./porties.js";
 import { huidigVoorstel, koppelVoorstel, planDialoog, stelVoorIn, voorstelBalk, voorstelTegel } from "./weekplan.js";
 import { kiesGerecht, wanneer } from "./kiezen.js";
+import { ikoon } from "../iconen.js";
 
 // Keuzes blijven bewaard zolang de pagina open is.
 const f = { sortering: "aanbevolen", categorie: "alle", vegetarisch: false, aantal: 9, week: null, alleMomenten: false };
@@ -60,55 +61,60 @@ export function inplannen(data, recept, herteken, extra = {}) {
   wanneer(data, recept, ({ dag, moment }) => zetOpMenu(data, { soort: "r", id: recept.id, dag, moment, extra }, herteken));
 }
 
-// Korte uitleg onder een gerecht in het rooster: hoeveel, en wat er met de rest gebeurt.
+// Korte uitleg onder een gerecht in het rooster, met iconen: 🍲 4 · 1 nu, 2 later, 1 ❄.
+// {html: met iconen, tekst: hetzelfde in woorden (title en het venster), let_op}.
 function tegelMeta(g, data, gerechten) {
   const r = data.recepten[g.recept];
   const keuze = !g.uit && r.keuzes?.opties?.find((o) => o.id === (g.keuze || r.keuzes.opties[0]?.id))?.naam;
-  const delen = [];
+  const html = [], tekst = [];
+  const zet = (ik, kort, lang) => { html.push(`${ik ? ikoon(ik) : ""}${esc(kort)}`); tekst.push(lang); };
   let let_op = "";
   if (g.uit === "voorraad") {
     const nogBewaard = data.voorraad.porties.some((p) => p.recept === g.recept);
-    delen.push(nogBewaard ? "uit de koelkast/vriezer" : "uit de voorraad, maar er ligt niets meer");
-    if (g.porties !== 1) delen.push(`${g.porties} porties`);
+    zet("refrigerator", g.porties !== 1 ? `${g.porties}` : "", nogBewaard ? "uit de koelkast/vriezer" : "uit de voorraad");
+    if (!nogBewaard) let_op = "er ligt niets meer bewaard";
   } else if (g.van) {
     const kook = gerechten.find((x) => x.id === g.van);
-    delen.push(kook?.dag ? `rest van ${weekdag(kook.dag)}` : "rest");
-    if (g.porties !== 1) delen.push(`${g.porties} porties`);
+    zet("corner-down-right", `rest${kook?.dag ? ` ${datumNl(kook.dag).split(" ")[0]}` : ""}${g.porties !== 1 ? ` · ${g.porties}` : ""}`,
+      kook?.dag ? `rest van ${weekdag(kook.dag)}` : "rest");
     if (!kook) let_op = "de kookbeurt staat niet meer op het menu";
     else if (!kook.dag || (g.dag && g.dag <= kook.dag)) let_op = "staat niet ná het koken";
   } else {
     const v = kookVerdeling(g, gerechten);
-    delen.push(`${g.porties} ${portieWoord(r, g.porties)} koken`);
-    if (v.resten || v.vriezer) {
-      delen.push(`${v.nu} nu`);
-      if (v.resten) delen.push(`${v.resten} later`);
-      if (v.vriezer) delen.push(`${v.vriezer} naar de vriezer`);
-    }
+    const verdeling = v.resten || v.vriezer
+      ? [`${v.nu} nu`, v.resten && `${v.resten} later`, v.vriezer && `${v.vriezer} vriezer`].filter(Boolean).join(", ") : "";
+    zet("cooking-pot", `${g.porties}${r.porties ? "" : "×"}${verdeling ? ` · ${verdeling}` : ""}`,
+      `${g.porties} ${portieWoord(r, g.porties)} koken${verdeling ? `: ${verdeling}` : ""}`);
   }
-  if (keuze) delen.unshift(keuze);
-  if (g.dag && g.dag < vandaag()) delen.push(`gepland voor ${datumNl(g.dag)}`);
-  return { tekst: delen.join(" · "), let_op };
+  if (keuze) { html.unshift(esc(keuze)); tekst.unshift(keuze); }
+  if (g.dag && g.dag < vandaag()) { html.push(esc(datumNl(g.dag))); tekst.push(`gepland voor ${datumNl(g.dag)}`); }
+  return { html: html.join(" · "), tekst: tekst.join(" · "), let_op };
 }
 
-// Eén gerecht in het weekrooster. Tikken op de naam opent het venster met alle keuzes.
-// Afgevinkt (gekookt/gegeten): grijs, zonder knop.
+// Eén gerecht in het weekrooster. De naam gaat naar het recept; ✎ opent het venster (dag,
+// porties, resten, weghalen); ✓ = gekookt of gegeten. Afgevinkt: grijs, zonder ✓.
 function tegel(g, data, gerechten) {
   const r = data.recepten[g.recept];
   const soort = g.uit === "voorraad" ? "voorraad" : g.van ? "rest" : "kook";
-  const { tekst, let_op } = g.gegeten ? { tekst: soort === "kook" ? "✓ gekookt" : "✓ gegeten" } : tegelMeta(g, data, gerechten);
-  const knop = g.gegeten ? "" : soort === "voorraad" ? "Gegeten" : soort === "kook" ? "Gekookt" : "";
+  const m = g.gegeten ? { html: `${ikoon("check")}${soort === "kook" ? "gekookt" : "gegeten"}`, tekst: "" } : tegelMeta(g, data, gerechten);
+  const klaar = g.gegeten ? "" : soort === "voorraad" ? "Gegeten" : soort === "kook" ? "Gekookt…" : "";
   return `<div class="wr-gerecht ${soort}${g.gegeten ? " gegeten" : ""}" data-id="${esc(g.id)}">
-    <button type="button" class="wr-titel" data-open title="Aanpassen">${esc(r.titel)}</button>
-    <small class="wr-meta">${esc(tekst)}</small>
-    ${let_op ? `<small class="wr-letop">${esc(let_op)}</small>` : ""}
-    ${knop ? `<button type="button" class="knop klein" data-klaar>${knop}</button>` : ""}
+    <a class="wr-titel" href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>
+    <div class="wr-onder">
+      <small class="wr-meta"${m.tekst ? ` title="${esc(m.tekst)}"` : ""}>${m.html}</small>
+      <span class="wr-knoppen">
+        ${klaar ? `<button type="button" class="ikoonknop" data-klaar title="${klaar}" aria-label="${klaar}">${ikoon("check")}</button>` : ""}
+        <button type="button" class="ikoonknop stil" data-open title="Dag, porties, resten…" aria-label="${esc(r.titel)} aanpassen">${ikoon("pencil")}</button>
+      </span>
+    </div>
+    ${m.let_op ? `<small class="wr-letop">${ikoon("triangle-alert")} ${esc(m.let_op)}</small>` : ""}
   </div>`;
 }
 
 // "Elders": in dit vak eet je niet thuis; de planner vult het niet in.
 const eldersTegel = (g) => `<div class="wr-gerecht elders" data-elders="${esc(g.id)}">
-    <span class="wr-titel">Elders</span>
-    <button type="button" class="mini" data-weg-elders title="Weghalen" aria-label="Elders weghalen">×</button>
+    <span class="wr-titel">${ikoon("ban")} Elders</span>
+    <button type="button" class="ikoonknop stil" data-weg-elders title="Weghalen" aria-label="Elders weghalen">${ikoon("x")}</button>
   </div>`;
 
 // Venster bij een gerecht op het menu: dag, moment, keuze, porties, resten, en weghalen.
@@ -151,7 +157,7 @@ function gerechtDialoog(g, data, kiesDagen, herteken, { voorstel = false } = {})
   dlg.className = "dialoog";
   dlg.innerHTML = `<form novalidate>
     <h2 class="dl-kop">${esc(r.titel)}</h2>
-    <p class="dl-titel"><small>${esc(tegelMeta(g, data, gerechten).tekst)}</small> · <a href="#/recept/${esc(r.id)}">naar het recept</a></p>
+    <p class="dl-titel"><small>${esc(tegelMeta(g, data, gerechten).tekst)}</small> · <a class="met-ik" href="#/recept/${esc(r.id)}">${ikoon("book-open")}recept</a></p>
     <div class="twee">
       <label class="veld"><span>Dag</span><select name="dag"><option value="">nog niet ingepland</option>${dagen.map((d) =>
         `<option value="${d}" ${d === g.dag ? "selected" : ""}>${esc(datumNl(d))}</option>`).join("")}</select></label>
@@ -175,10 +181,12 @@ function gerechtDialoog(g, data, kiesDagen, herteken, { voorstel = false } = {})
     <p class="fout" hidden></p>
     <div class="knoppen">
       <button class="knop primair" type="submit">Opslaan</button>
-      ${(kook || uitVoorraad) && !g.gegeten ? `<button class="knop" type="button" data-klaar>${uitVoorraad ? "Gegeten" : "Gekookt…"}</button>` : ""}
+      ${(kook || uitVoorraad) && !g.gegeten ? `<button class="knop" type="button" data-klaar>${ikoon("check")}${uitVoorraad ? "Gegeten" : "Gekookt…"}</button>` : ""}
       <button class="knop" type="button" data-annuleer>Annuleren</button>
-      ${g.dag && !g.gegeten ? `<button class="knop" type="button" data-elders title="Dit vak wordt 'Elders'; wat ervan afhing wordt opnieuw voorgesteld">Ik eet hier niet</button>` : ""}
-      <button class="knop gevaar" type="button" data-weg>Van het menu halen</button>
+    </div>
+    <div class="knoppen bijzaak">
+      ${g.dag && !g.gegeten ? `<button class="knop klein" type="button" data-elders title="Dit vak wordt 'Elders'; wat ervan afhing wordt opnieuw voorgesteld">${ikoon("ban")}Ik eet hier niet</button>` : ""}
+      <button class="knop klein gevaar" type="button" data-weg>${ikoon("trash-2")}Van het menu</button>
     </div>
   </form>`;
   document.body.append(dlg);
@@ -324,36 +332,43 @@ function klaarMet(g, data, herteken) {
   portieActie(data, p, "eten", () => wijzig("menu", (doc) => afvinken(doc, g.id)).then(herteken, fout));
 }
 
+// "3 d", "2 wk", "4 mnd": hoe lang geleden, kort.
+function kortGeleden(iso) {
+  const n = -dagenTot(iso);
+  return n <= 0 ? "vandaag" : n < 14 ? `${n} d` : n < 61 ? `${Math.round(n / 7)} wk` : `${Math.round(n / 30)} mnd`;
+}
+
+// Suggestie: titel, en waarom in kleine labels met een icoon (de hele zin staat in de tooltip).
 function suggestieKaart(i, opMenu, metVoorraad) {
   const { r, dek } = i;
-  const redenen = [];
-  if (f.sortering === "favorieten") redenen.push(`${i.laatst.aantal}× gegeten, laatst ${geleden(i.laatst.datum)}`);
-  else redenen.push(i.laatst ? `Laatst gegeten ${geleden(i.laatst.datum)}` : "Nog niet gegeten");
+  const label = (ik, tekst, uitleg, klasse = "") => `<span class="rk-label${klasse ? ` ${klasse}` : ""}" title="${esc(uitleg)}">${ikoon(ik)}${esc(tekst)}</span>`;
+  const labels = [];
+  if (f.sortering === "favorieten") labels.push(label("heart", `${i.laatst.aantal}×`, `${i.laatst.aantal}× gegeten, laatst ${geleden(i.laatst.datum)}`));
+  else labels.push(i.laatst ? label("clock", kortGeleden(i.laatst.datum), `Laatst gegeten ${geleden(i.laatst.datum)}`)
+    : label("sparkles", "nieuw", "Nog niet gegeten"));
   if (i.bewaard) {
     const { koelkast, vriezer } = i.bewaard;
-    redenen.push(`Al ${[koelkast && `${koelkast} in de koelkast`, vriezer && `${vriezer} in de vriezer`].filter(Boolean).join(" en ")}`);
+    labels.push(label("refrigerator", `${koelkast + vriezer} klaar`, `Al ${[koelkast && `${koelkast} in de koelkast`, vriezer && `${vriezer} in de vriezer`].filter(Boolean).join(" en ")}`));
   }
   if (metVoorraad && dek.totaal) {
     const n = dek.ontbreekt.length;
-    redenen.push(!n ? "Alles in huis"
-      : n <= 3 ? `Nog kopen: ${dek.ontbreekt.join(", ").toLowerCase()}`
-      : `Nog ${n} van ${dek.totaal} ingrediënten kopen`);
+    labels.push(!n ? label("check", "in huis", "Alles in huis", "goed")
+      : label("shopping-cart", `${n} kopen`, `Nog kopen: ${dek.ontbreekt.join(", ").toLowerCase()}`));
   }
-  const gauw = dek.gauw.length
-    ? `<span class="rk-gauw">Gebruikt ${esc(dek.gauw.map((g) => `${g.naam.toLowerCase()} (${g.open ? "open, " : ""}${houdbaar(g.datum)})`).join(", "))}</span>` : "";
-  const veel = i.ov.meest && i.ov.meest[1] >= 2
-    ? `<span class="rk-afwisseling">Deze week al ${i.ov.meest[1]}× ${esc(i.ov.meest[0])}</span>` : "";
-  // Aanbiedingen: kleine labels "tofu −26%" (hoeveel goedkoper dan normaal), details bij aanwijzen.
+  if (dek.gauw.length) {
+    labels.push(label("triangle-alert", dek.gauw[0].naam.toLowerCase().replace(/\s*\(.*?\)/g, "") + (dek.gauw.length > 1 ? ` +${dek.gauw.length - 1}` : ""),
+      `Gebruikt wat gauw op moet: ${dek.gauw.map((g) => `${g.naam.toLowerCase()} (${g.open ? "open, " : ""}${houdbaar(g.datum)})`).join(", ")}`, "waarsch"));
+  }
+  // Aanbiedingen: het grootste voordeel, de rest in de tooltip.
   const kort = i.actieKort || [];
-  const actie = kort.length ? `<span class="rk-acties"><span class="rk-actie-kop">Aanbieding</span>${kort.slice(0, 3).map((x) =>
-    `<span class="rk-actie" title="${esc(x.uitleg)}">${esc(x.naam)} −${x.procent}%</span>`).join("")}${
-    kort.length > 3 ? `<span class="rk-actie meer" title="${esc(kort.slice(3).map((x) => `${x.naam} −${x.procent}%`).join(", "))}">+${kort.length - 3}</span>` : ""}</span>` : "";
+  if (kort.length) labels.push(label("badge-percent", `−${kort[0].procent}%`, kort.map((x) => `${x.naam} −${x.procent}% (${x.uitleg})`).join("\n"), "actie"));
+  if (i.ov.meest && i.ov.meest[1] >= 2) labels.push(label("refresh-cw", `${i.ov.meest[1]}× ${i.ov.meest[0]}`, `Deze week al ${i.ov.meest[1]}× ${i.ov.meest[0]}`, "zacht"));
   const al = opMenu.has(r.id);
   return `<div class="receptkaart suggestie">
     <a class="rk-titel" href="#/recept/${esc(r.id)}">${esc(r.titel)}</a>
     ${r.ondertitel ? `<span class="rk-onder">${esc(r.ondertitel)}</span>` : ""}
-    <span class="rk-reden">${redenen.map(esc).join(" · ")}</span>${gauw}${actie}${veel}
-    <button class="knop klein" data-plan="${esc(r.id)}" ${al ? "disabled" : ""}>${al ? "✓ Op het menu" : "+ Op het menu"}</button>
+    <span class="rk-labels">${labels.join("")}</span>
+    <button class="knop klein" data-plan="${esc(r.id)}" ${al ? "disabled" : ""}>${al ? `${ikoon("check")}Gepland` : `${ikoon("calendar-plus")}Inplannen`}</button>
   </div>`;
 }
 
@@ -371,7 +386,7 @@ function klaarRegels(data) {
   }
   return ["koelkast", "vriezer"].map((plek) => {
     const xs = [...per.values()].filter((x) => x.plek === plek);
-    return xs.length ? `<div class="klaar-rij"><span class="klaar-plek ${plek}">${plek === "koelkast" ? "Koelkast" : "Vriezer"}</span>
+    return xs.length ? `<div class="klaar-rij"><span class="klaar-plek ${plek}" title="${plek === "koelkast" ? "Koelkast" : "Vriezer"}">${ikoon(plek === "koelkast" ? "refrigerator" : "snowflake")}</span>
       ${xs.map((x) => `<button type="button" class="chip${x.oud ? " oud" : ""}" data-klaar="${esc(x.recept)}" data-plek="${plek}"
         title="${x.oud ? "Ligt er al een tijdje: eerst opeten" : "Gegeten, verplaatsen of weggooien"}">${esc(data.recepten[x.recept].titel)} · ${x.aantal}</button>`).join("")}</div>` : "";
   }).join("");
@@ -431,7 +446,7 @@ export function menu(main, data, sortering) {
           ${hier.map((g) => tegel(g, data, gerechten)).join("")}
           ${vs.map((i) => voorstelTegel(i, data)).join("")}
           ${weg.length ? "" : `<button type="button" class="wr-plus${leeg ? "" : " klein"}" data-dag="${d}" data-moment="${m}"
-            aria-label="${esc(naam)} op ${esc(datumNl(d))}: gerecht kiezen" title="Gerecht kiezen">+</button>`}
+            aria-label="${esc(naam)} op ${esc(datumNl(d))}: gerecht kiezen" title="Gerecht kiezen">${ikoon("plus")}</button>`}
         </div>`;
       }).join("")}
     </section>`).join("")}
@@ -480,46 +495,47 @@ export function menu(main, data, sortering) {
     ${klaar ? `<section class="klaar"><h2 class="kop2">Klaar om te eten</h2>${klaar}</section>` : ""}
 
     <section class="blokje">
-      <div class="kopregel"><h2 class="kop2">${begin === nu ? `De komende ${zichtbaar} dagen` : `${esc(datumNl(begin))} – ${esc(datumNl(weekDagen.at(-1)))}`}</h2>
+      <div class="kopregel weekkop"><h2 class="kop2">${begin === nu ? `De komende ${zichtbaar} dagen` : `${esc(datumNl(begin))} – ${esc(datumNl(weekDagen.at(-1)))}`}</h2>
         <span class="weeknav">
-          ${begin > nu ? `<button class="knop klein" data-week="-${zichtbaar}" aria-label="Terug">‹</button>
-            <button class="knop klein" data-week="0">Vanaf vandaag</button>` : ""}
-          <button class="knop klein" data-week="${zichtbaar}" aria-label="Verder">›</button></span></div>
-      ${voorstel ? voorstelBalk(data, weekDagen.at(-1))
-        : `<p class="planknop"><button class="knop primair" data-voorstel>Stel een weekplan voor…</button>
-          <small class="hint">Vult de lege vakken op basis van wat je in huis hebt, afwisseling en wat je lang niet hebt gegeten.</small></p>`}
+          ${begin > nu ? `<button class="ikoonknop" data-week="-${zichtbaar}" title="Eerder" aria-label="Eerder">${ikoon("chevron-left")}</button>
+            <button class="knop klein" data-week="0">Vandaag</button>` : ""}
+          <button class="ikoonknop" data-week="${zichtbaar}" title="Later" aria-label="Later">${ikoon("chevron-right")}</button>
+          ${voorstel ? "" : `<button class="knop klein primair" data-voorstel
+            title="Vult de lege vakken: wat je lang niet at, wat in huis is en gauw op moet, met afwisseling">${ikoon("sparkles")}Weekplan voorstellen</button>`}
+        </span></div>
+      ${voorstel ? voorstelBalk(data, weekDagen.at(-1)) : ""}
       ${inTePlannen.length ? `<div class="wr-los"><h3 class="wr-loskop">Nog in te plannen</h3>
         <div class="wr-lostegels">${inTePlannen.map((g) => tegel(g, data, gerechten)).join("")}</div></div>` : ""}
       ${rooster}
       ${verborgen.length || f.alleMomenten ? `<p class="na-rooster"><button type="button" class="linkknop" data-momenten>${f.alleMomenten
-        ? "Alleen de maaltijden die ik plan tonen" : `Ook ${verborgen.map(([, n]) => n.toLowerCase()).join(" en ")} tonen`}</button></p>` : ""}
+        ? "Minder maaltijden tonen" : `+ ${verborgen.map(([, n]) => n.toLowerCase()).join(" en ")}`}</button></p>` : ""}
     </section>
 
     <section class="blokje">
       <h2 class="kop2">Suggesties</h2>
       <div class="filters">
         <div class="chipgroep">
-          <button class="chip${f.sortering === "aanbevolen" ? " aan" : ""}" data-sort="aanbevolen" title="Lang niet gegeten, afwisseling, wat gauw op moet, wat in huis is">Aanbevolen</button>
-          <button class="chip${f.sortering === "voorraad" ? " aan" : ""}" data-sort="voorraad">Met wat ik in huis heb</button>
-          <button class="chip${f.sortering === "favorieten" ? " aan" : ""}" data-sort="favorieten">Favorieten</button>
-          ${metActies ? `<button class="chip${f.sortering === "aanbieding" ? " aan" : ""}" data-sort="aanbieding">In de aanbieding</button>` : ""}
-        </div>
-        <div class="chipgroep">
-          <button class="chip${f.categorie === "alle" ? " aan" : ""}" data-cat="alle">Alle</button>
-          ${cats.map((c) => `<button class="chip${f.categorie === c.id ? " aan" : ""}" data-cat="${esc(c.id)}">${esc(c.naam)}</button>`).join("")}
-          <button class="chip${f.vegetarisch ? " aan" : ""}" data-veg>Vegetarisch</button>
+          <button class="chip${f.sortering === "aanbevolen" ? " aan" : ""}" data-sort="aanbevolen" title="Lang niet gegeten, afwisseling, wat gauw op moet, wat in huis is">${ikoon("sparkles")}Aanbevolen</button>
+          <button class="chip${f.sortering === "voorraad" ? " aan" : ""}" data-sort="voorraad" title="Met wat ik in huis heb">${ikoon("package")}In huis</button>
+          <button class="chip${f.sortering === "favorieten" ? " aan" : ""}" data-sort="favorieten" title="Vaak gegeten, al even niet">${ikoon("heart")}Favorieten</button>
+          ${metActies ? `<button class="chip${f.sortering === "aanbieding" ? " aan" : ""}" data-sort="aanbieding" title="Met ingrediënten in de aanbieding">${ikoon("badge-percent")}Aanbieding</button>` : ""}
+          <span class="filter-rechts">
+            <select class="filterkeuze" data-categorie aria-label="Categorie"><option value="alle">Alle categorieën</option>${cats.map((c) =>
+              `<option value="${esc(c.id)}" ${f.categorie === c.id ? "selected" : ""}>${esc(c.naam)}</option>`).join("")}</select>
+            <button class="chip${f.vegetarisch ? " aan" : ""}" data-veg title="Alleen vegetarisch">${ikoon("leaf")}Vega</button>
+          </span>
         </div>
       </div>
       ${f.sortering === "voorraad" && !metVoorraad
-        ? `<p class="waarschuwing los">Je voorraad is nog leeg. Zet bij <a href="#/voorraad">Voorraad</a> wat je in huis hebt, dan kijken de suggesties daarnaar.</p>` : ""}
-      ${gauw.length ? `<p class="hint gauwregel"><b>Gauw op:</b> ${gauw.slice(0, 6).map((x) =>
-        `${esc(x.ing?.naam || x.p.ingredient)} (${x.p.geopend ? "open, " : ""}${esc(houdbaar(x.datum))})`).join(", ")}${gauw.length > 6 ? " …" : ""}
-        ${f.sortering !== "voorraad" ? `<button class="chip" data-gauw>Recepten die dit gebruiken</button>` : ""}</p>` : ""}
+        ? `<p class="waarschuwing los">Je voorraad is nog leeg: zet bij <a href="#/voorraad">Voorraad</a> wat je in huis hebt.</p>` : ""}
+      ${gauw.length ? `<p class="gauwregel">${ikoon("triangle-alert")}<span title="${esc(gauw.map((x) => `${x.ing?.naam || x.p.ingredient} (${x.p.geopend ? "open, " : ""}${houdbaar(x.datum)})`).join("\n"))}">Gauw op:
+        ${esc(gauw.slice(0, 4).map((x) => (x.ing?.naam || x.p.ingredient).toLowerCase().replace(/\s*\(.*?\)/g, "")).join(", "))}${gauw.length > 4 ? ` +${gauw.length - 4}` : ""}</span>
+        ${f.sortering !== "voorraad" ? `<button class="chip" data-gauw>Recepten hiermee</button>` : ""}</p>` : ""}
       ${items.length ? `<div class="raster">${items.slice(0, f.aantal).map((i) => suggestieKaart(i, opMenu, metVoorraad)).join("")}</div>
-        ${items.length > f.aantal ? `<p><button class="chip leeg" data-meer>Meer suggesties</button></p>` : ""}`
+        ${items.length > f.aantal ? `<p><button class="chip leeg" data-meer>Meer</button></p>` : ""}`
         : `<p class="leeg-tekst">${f.sortering === "favorieten"
-          ? "Nog geen favorieten: gerechten die je vaker eet (en al even niet hebt gehad) komen hier vanzelf."
-          : f.sortering === "aanbieding" ? "Geen gerechten met ingrediënten die deze week in de aanbieding zijn."
+          ? "Nog geen favorieten: wat je vaker eet, komt hier vanzelf."
+          : f.sortering === "aanbieding" ? "Deze week niets in de aanbieding voor je recepten."
           : "Geen recepten met deze keuzes."}</p>`}
     </section>`;
 
@@ -563,6 +579,11 @@ export function menu(main, data, sortering) {
     f.aantal = STAP;
     // #/menu/voorraad zou de sortering bij opnieuw tekenen terugzetten
     if (location.hash.startsWith("#/menu")) history.replaceState(null, "", "#/");
+    herteken(data);
+  });
+  main.querySelector("[data-categorie]").addEventListener("change", (e) => {
+    f.categorie = e.target.value;
+    f.aantal = STAP;
     herteken(data);
   });
   main.querySelector("[data-meer]")?.addEventListener("click", () => { f.aantal += STAP; herteken(data); });

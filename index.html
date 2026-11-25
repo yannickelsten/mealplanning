@@ -17,17 +17,22 @@
 <body>
   <header class="balk">
     <a class="logo" href="#/">Mealplanning</a>
+    <!-- Laptop: alle tabs naast elkaar. Telefoon: balk onderaan met de eerste vier + "Meer".
+         De iconen (data-ik) zet main.js erin. -->
     <nav class="hoofdnav">
-      <a href="#/" data-nav="menu">Eten</a>
-      <a href="#/boodschappen" data-nav="boodschappen">Boodschappen<span class="nav-tel" id="nav-tel"></span></a>
-      <a href="#/voorraad" data-nav="voorraad">Voorraad</a>
-      <a href="#/recepten" data-nav="recepten">Recepten</a>
-      <details class="meer">
-        <summary>Meer</summary>
+      <a href="#/" data-nav="menu" data-ik="utensils" title="Wat eten we?"><span>Eten</span></a>
+      <a href="#/boodschappen" data-nav="boodschappen" data-ik="shopping-cart" title="Boodschappen"><span>Boodschappen</span><span class="nav-tel" id="nav-tel"></span></a>
+      <a href="#/voorraad" data-nav="voorraad" data-ik="package" title="Voorraad"><span>Voorraad</span></a>
+      <a href="#/recepten" data-nav="recepten" data-ik="book-open" title="Recepten"><span>Recepten</span></a>
+      <a class="breed" href="#/logboek" data-nav="logboek" data-ik="chart-column" title="Logboek"><span>Logboek</span></a>
+      <a class="breed" href="#/ingredienten" data-nav="ingredienten" data-ik="carrot" title="Ingrediënten"><span>Ingrediënten</span></a>
+      <a class="breed" href="#/telefoon" data-nav="telefoon" data-ik="smartphone" title="Telefoon"><span>Telefoon</span></a>
+      <details class="meer smal">
+        <summary data-ik="ellipsis"><span>Meer</span></summary>
         <div class="meer-paneel">
-          <a href="#/logboek" data-nav="logboek">Logboek</a>
-          <a href="#/ingredienten" data-nav="ingredienten">Ingrediënten</a>
-          <a href="#/telefoon" data-nav="telefoon">Telefoon</a>
+          <a href="#/logboek" data-nav="logboek" data-ik="chart-column"><span>Logboek</span></a>
+          <a href="#/ingredienten" data-nav="ingredienten" data-ik="carrot"><span>Ingrediënten</span></a>
+          <a href="#/telefoon" data-nav="telefoon" data-ik="smartphone"><span>Telefoon</span></a>
         </div>
       </details>
     </nav>

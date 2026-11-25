@@ -3,6 +3,7 @@
 import { MOMENTEN, MOMENT_NAAM, bewaardPerGerecht, dezeWeek, eersteVrijVak, gerechtScore, laatstGegeten, momentVan,
   momentenVan, redenenVoor, restKandidaten } from "../planning.js";
 import { datumNl, esc, plusDagen, vandaag, weekdag } from "../util.js";
+import { ikoon } from "../iconen.js";
 
 const receptNaam = (r) => `${r.titel}${r.variant_van && r.ondertitel ? ` (${r.ondertitel})` : ""}`;
 
@@ -47,9 +48,9 @@ export function kiesGerecht(data, dag, moment, kies) {
   const blok = (kop, items) => (items.length ? `<h3 class="kz-kop">${esc(kop)}</h3><ul class="kz-lijst">${items.join("")}</ul>` : "");
   const dlg = venster(`<div class="kiezer">
     <h2 class="dl-kop">${esc(MOMENT_NAAM[moment])} <small>${esc(datumNl(dag))}</small></h2>
-    <input type="search" class="kz-zoek" placeholder="Zoek een recept…" aria-label="Zoek een recept" autocomplete="off">
+    <label class="zoekveld">${ikoon("search")}<input type="search" class="kz-zoek" placeholder="Zoek een recept…" aria-label="Zoek een recept" autocomplete="off"></label>
     <div class="kz-inhoud"></div>
-    <div class="knoppen"><button class="knop" type="button" data-kies="elders:">Ik eet elders</button>
+    <div class="knoppen"><button class="knop" type="button" data-kies="elders:">${ikoon("ban")}Ik eet elders</button>
       <button class="knop" type="button" data-annuleer>Annuleren</button></div>
   </div>`);
   const inhoud = dlg.querySelector(".kz-inhoud");
@@ -101,8 +102,7 @@ export function wanneer(data, recept, kies) {
       <label class="veld"><span>Maaltijd</span><select name="moment">${MOMENTEN.map(([m, naam]) =>
         `<option value="${m}" ${m === vak.moment ? "selected" : ""}>${naam}${past.length && !past.includes(m) ? " (past normaal niet)" : ""}</option>`).join("")}</select></label>
     </div>
-    <p class="hint">Het eerste vrije moment staat al gekozen.</p>
-    <div class="knoppen"><button class="knop primair" type="submit">Op het menu</button>
+    <div class="knoppen"><button class="knop primair" type="submit">${ikoon("calendar-plus")}Op het menu</button>
       <button class="knop" type="button" data-annuleer>Annuleren</button></div>
   </form>`);
   const form = dlg.querySelector("form");

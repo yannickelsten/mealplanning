@@ -1,6 +1,7 @@
 import { afgeleideTags, regels, voeding } from "../voeding.js";
 import { datumNl, esc, nl } from "../util.js";
 import { recentGewijzigd } from "./recept.js";
+import { ikoon } from "../iconen.js";
 
 // Filters blijven bewaard zolang de pagina open is.
 const f = {
@@ -82,13 +83,13 @@ export function overzicht(main, data) {
 
   main.innerHTML = `
     <div class="kopregel"><h1 class="paginatitel">Recepten</h1>
-      <a class="knop alleen-laptop" href="#/nieuw-recept">+ Nieuw recept</a></div>
-    ${recent.length ? `<section class="recent"><span class="label">Recent toegevoegd of aangepast</span>
+      <a class="knop alleen-laptop" href="#/nieuw-recept">${ikoon("plus")}Nieuw recept</a></div>
+    ${recent.length ? `<details class="recent"><summary>${ikoon("sparkles")} ${recent.length} recent toegevoegd of aangepast</summary>
       <ul>${recent.map((r) => `<li><a href="#/recept/${esc(r.id)}">${esc(r.titel)}${r.variant_van && r.ondertitel ? ` <small>(${esc(r.ondertitel)})</small>` : ""}</a>
         <span class="badge nieuw">${recentGewijzigd(r)}</span>
-        <small>${esc(datumNl(r.wijzigingen.at(-1).datum))}: ${esc(r.wijzigingen.at(-1).wat)}</small></li>`).join("")}</ul></section>` : ""}
+        <small>${esc(datumNl(r.wijzigingen.at(-1).datum))}: ${esc(r.wijzigingen.at(-1).wat)}</small></li>`).join("")}</ul></details>` : ""}
     <div class="zoekbalk">
-      <input type="search" id="zoek" placeholder="Zoek recept of ingrediënt…" value="${esc(f.zoek)}" autocomplete="off">
+      <label class="zoekveld">${ikoon("search")}<input type="search" id="zoek" placeholder="Zoek recept of ingrediënt…" aria-label="Zoek recept of ingrediënt" value="${esc(f.zoek)}" autocomplete="off"></label>
     </div>
     <div class="filterbalk">
       <select id="categorie" class="filterkeuze" aria-label="Categorie">
@@ -96,7 +97,7 @@ export function overzicht(main, data) {
         ${cats.map((c) => `<option value="${esc(c.id)}" ${f.categorie === c.id ? "selected" : ""}>${esc(c.naam)}</option>`).join("")}
       </select>
       ${KEUZES.map(([naam, label]) => dropdown(naam, label, alle)).join("")}
-      <label class="vink filtervink"><input type="checkbox" id="veg" ${f.vegetarisch ? "checked" : ""}> Vegetarisch</label>
+      <label class="vink filtervink"><input type="checkbox" id="veg" ${f.vegetarisch ? "checked" : ""}> ${ikoon("leaf")}Vega</label>
     </div>
     <div class="actief"></div>
     <div id="lijst"></div>`;

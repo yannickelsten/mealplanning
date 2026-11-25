@@ -11,6 +11,22 @@ import { boodschappen } from "./views/boodschappen.js";
 import { logboek } from "./views/logboek.js";
 import { koppelScherm, telefoon } from "./views/telefoon.js";
 import { boodschappenlijst } from "./planning.js";
+import { ikoon } from "./iconen.js";
+
+// Iconknoppen (alleen een icoon): op een touchscreen toont lang drukken wat de knop doet (de
+// title), zonder hem in te drukken. Met een muis toont de browser de title zelf.
+let drukTimer = null, uitlegGetoond = false;
+document.addEventListener("touchstart", (e) => {
+  const b = e.target.closest(".ikoonknop[title]");
+  uitlegGetoond = false;
+  if (!b) return;
+  drukTimer = setTimeout(() => { uitlegGetoond = true; melding(b.title); }, 500);
+}, { passive: true });
+for (const t of ["touchend", "touchmove", "touchcancel"]) document.addEventListener(t, () => clearTimeout(drukTimer), { passive: true });
+document.addEventListener("click", (e) => {
+  if (uitlegGetoond && e.target.closest(".ikoonknop")) { e.preventDefault(); e.stopPropagation(); uitlegGetoond = false; }
+}, true);
+document.addEventListener("contextmenu", (e) => { if (e.target.closest(".ikoonknop[title]")) e.preventDefault(); });
 
 // Op de telefoon (via GitHub) kunnen recepten niet bewerkt worden: zie store.js.
 const opLaptop = (view) => (main, data, id) => alleenLezen
@@ -18,8 +34,10 @@ const opLaptop = (view) => (main, data, id) => alleenLezen
       <a class="terug" href="${id ? `#/recept/${encodeURIComponent(id)}` : "#/recepten"}">← Terug</a>`)
   : view(main, data, id);
 document.body.classList.toggle("telefoon", soort === "github");
+// Iconen in de menubalk.
+document.querySelectorAll("[data-ik]").forEach((el) => el.insertAdjacentHTML("afterbegin", ikoon(el.dataset.ik)));
 if (soort === "github") {
-  document.querySelector('[data-nav="telefoon"]').textContent = "Koppeling";
+  document.querySelectorAll('[data-nav="telefoon"] span').forEach((s) => { s.textContent = "Koppeling"; });
   // Zodat de app ook zonder bereik opent.
   navigator.serviceWorker?.register("sw.js").catch(() => {});
 }

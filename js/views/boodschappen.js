@@ -4,6 +4,7 @@ import { aanbiedingenVan, aanbiedingTekst, besteVerpakking, boodschappenlijst, e
   koopAdvies, normaalPrijs, PLEKKEN, prijsVan, prijsVanPakken, rond, sleutelExtra, soortVan, standaardPlek, teKoken,
   toonHoeveelheid, toonPartijen, verpakkingen, verpakkingOpties, voorraadEenheden } from "../planning.js";
 import { breuk, datumNl, esc, euro, groepNaam, melding, nieuwId, nl, vandaag } from "../util.js";
+import { ikoon } from "../iconen.js";
 import { ingredientKeuzelijst, vindIngredient } from "./voorraad.js";
 
 const fout = (err) => melding(err.message);
@@ -133,9 +134,9 @@ export function boodschappen(main, data) {
       <span class="b-tekst"><span class="b-naam">${esc(r.naam)}</span>${r.hv ? ` <span class="b-hv">${esc(r.hv)}</span>` : ""}${actieHtml(r.actie, data)}</span></label>
     ${r.prijs != null ? `<span class="b-prijs">±${esc(euro(r.prijs))}</span>` : ""}
     <span class="b-acties">
-      ${r.detail ? `<button class="mini" data-meer aria-expanded="false" aria-label="Meer over ${esc(r.naam)}" title="Meer">▾</button>` : ""}
-      ${r.slug && !r.extraId ? `<button class="knop klein" data-nietnodig title="${r.alleenOp ? "Niet opnieuw kopen" : "Heb ik al: staat in de voorraad als 'genoeg in huis'"}">niet nodig</button>` : ""}
-      ${r.extraId ? `<button class="kruisje" data-extraweg aria-label="Weghalen" title="Weghalen">×</button>` : ""}
+      ${r.detail ? `<button class="ikoonknop stil draai" data-meer aria-expanded="false" aria-label="Meer over ${esc(r.naam)}" title="Meer">${ikoon("chevron-down")}</button>` : ""}
+      ${r.slug && !r.extraId ? `<button class="ikoonknop" data-nietnodig title="${r.alleenOp ? "Niet nodig: niet opnieuw kopen" : "Heb ik al (in huis)"}" aria-label="${r.alleenOp ? "Niet nodig" : "Heb ik al"}">${ikoon("house")}</button>` : ""}
+      ${r.extraId ? `<button class="ikoonknop stil" data-extraweg aria-label="Weghalen" title="Weghalen">${ikoon("x")}</button>` : ""}
     </span>
     ${r.kort ? `<small class="b-detail">${esc(r.kort)}</small>` : ""}
     ${r.detail ? `<small class="b-detail b-extra" hidden>${esc(r.detail)}</small>` : ""}</li>`;
@@ -143,46 +144,46 @@ export function boodschappen(main, data) {
   // "Voor 5 maaltijden (wo–vr)", open te klappen naar de gerechten zelf.
   const dagenMenu = gerechten.map((g) => g.dag).filter(Boolean).sort();
   const periode = dagenMenu.length ? ` (${datumNl(dagenMenu[0]).split(" ")[0]}${dagenMenu.at(-1) !== dagenMenu[0] ? `–${datumNl(dagenMenu.at(-1)).split(" ")[0]}` : ""})` : "";
+  // Aanbiedingen: één regel onderaan (met de vermelding van de bron, zoals PrijsProfeet vraagt).
   const winkel = gekoppeld ? `<div class="b-winkel">
-      <span class="b-winkelstatus">${heeftAanbiedingen(data)
-        ? `Aanbiedingen van AH en Jumbo, opgehaald ${esc(datumNl(opgehaald))}`
-        : opgehaald ? `De aanbiedingen van ${esc(datumNl(opgehaald))} zijn verlopen` : "Nog geen aanbiedingen opgehaald"}
-        <small>(via <a href="https://www.prijsprofeet.nl" target="_blank" rel="noopener">PrijsProfeet</a>; alleen wat per kg
-          minstens 10% goedkoper is dan normaal; controleer de prijs in de winkel)</small></span>
+      <span class="b-winkelstatus" title="Alleen wat per kg minstens 10% goedkoper is dan normaal. Controleer de prijs in de winkel.">${ikoon("badge-percent")}
+        ${heeftAanbiedingen(data) ? `Aanbiedingen AH en Jumbo, ${esc(datumNl(opgehaald))}`
+          : opgehaald ? `Aanbiedingen van ${esc(datumNl(opgehaald))} verlopen` : "Nog geen aanbiedingen"}
+        · via <a href="https://www.prijsprofeet.nl" target="_blank" rel="noopener">PrijsProfeet</a></span>
       <span class="alleen-laptop b-winkelknoppen">
         <button class="knop klein" data-taak="bijwerken" ${bezig ? "disabled" : ""}
-          title="Haalt de gewone Jumboprijzen en de aanbiedingen van AH en Jumbo op (±2 minuten)">${bezig ? "Bezig…" : "Prijzen en aanbiedingen bijwerken"}</button>
+          title="Haalt de gewone Jumboprijzen en de aanbiedingen van AH en Jumbo op (±2 minuten)">${ikoon("refresh-cw")}${bezig ? "Bezig…" : "Prijzen bijwerken"}</button>
         <span class="b-taakstatus" aria-live="polite"></span>
       </span>
     </div>` : "";
 
   main.innerHTML = `
     <div class="kopregel"><h1 class="paginatitel">Boodschappen</h1>
-      ${rijen.length ? `<button class="knop" id="kopieer">Lijst kopiëren</button>` : ""}</div>
-    ${gerechten.length ? `<details class="voor"><summary>Voor ${gerechten.length} ${gerechten.length === 1 ? "maaltijd" : "maaltijden"}${esc(periode)}${
-      metPrijs.length ? ` · ±${esc(euro(totaal))}${zonderPrijs ? ` <small>(+ ${zonderPrijs} zonder prijs)</small>` : ""}` : ""}</summary>
+      ${rijen.length ? `<button class="knop klein" id="kopieer" title="Kopiëren, om in een berichtje of notitie te plakken">${ikoon("copy")}Kopiëren</button>` : ""}</div>
+    ${gerechten.length ? `<details class="voor"><summary>${ikoon("calendar")} ${gerechten.length} ${gerechten.length === 1 ? "maaltijd" : "maaltijden"}${esc(periode)}${
+      metPrijs.length ? ` · ±${esc(euro(totaal))}${zonderPrijs ? ` <small title="${zonderPrijs} zonder prijs">+ ?</small>` : ""}` : ""}</summary>
       <p>${gerechten.map((g) => `<a href="#/recept/${esc(g.recept)}">${esc(data.recepten[g.recept].titel)}</a> <small>(${g.porties}${g.dag ? `, ${esc(datumNl(g.dag))}` : ""})</small>`).join(", ")}
         · <a href="#/">menu aanpassen</a></p>
-      ${onderdelen.size ? `<p class="hint">Al gemaakt, uit de koelkast/vriezer: ${[...onderdelen].map(([id, keer]) =>
-        `${esc(data.recepten[id]?.titel || id)} (${breuk(keer)}×)`).join(", ")}. Daarvoor hoef je niets te kopen.</p>` : ""}</details>`
-      : `<p class="voor">Er staat nog niets op het menu. <a href="#/">Kies wat je gaat eten</a>, dan komen de ingrediënten hier vanzelf.</p>`}
+      ${onderdelen.size ? `<p class="hint">Al gemaakt: ${[...onderdelen].map(([id, keer]) =>
+        `${esc(data.recepten[id]?.titel || id)} (${breuk(keer)}×)`).join(", ")}; daarvoor hoef je niets te kopen.</p>` : ""}</details>`
+      : `<p class="voor">Nog niets op het menu. <a href="#/">Kies wat je gaat eten</a>.</p>`}
     <form class="b-toevoegen" autocomplete="off">
-      <input name="naam" list="b-ingredienten" placeholder="Zelf iets toevoegen, bv. melk of wc-papier" aria-label="Zelf iets toevoegen">
+      <input name="naam" list="b-ingredienten" placeholder="Zelf iets toevoegen…" aria-label="Zelf iets toevoegen">
       ${ingredientKeuzelijst(data, "b-ingredienten")}
-      <button class="knop" type="submit">Toevoegen</button>
+      <button class="knop" type="submit" aria-label="Toevoegen">${ikoon("plus")}<span class="breed-tekst">Toevoegen</span></button>
     </form>
+    ${rijen.length ? `<p class="legenda"><span>${ikoon("house")} heb ik al</span><span>${ikoon("chevron-down")} meer</span></p>` : ""}
     ${nu.length ? groepen.map((g) => `<section class="categorie"><h2>${esc(groepTitel(g))}</h2>
       <ul class="blijst">${nu.filter((r) => r.groep === g).sort((a, b) => a.naam.localeCompare(b.naam, "nl")).map(rijHtml).join("")}</ul></section>`).join("")
       : gerechten.length && !later.length ? `<p class="leeg-tekst">Je hebt alles in huis.</p>` : ""}
-    ${later.length ? `<section class="categorie later"><h2>Later kopen <small>vers houden: pas later in de week nodig</small></h2>
+    ${later.length ? `<section class="categorie later"><h2 class="met-ik">${ikoon("clock")}Later kopen <small>vers, pas later nodig</small></h2>
       <ul class="blijst">${later.map(rijHtml).join("")}</ul></section>` : ""}
-    ${aantalAf ? `<div class="knoppen b-klaar"><button class="knop primair" id="naar-voorraad">Klaar met winkelen: ${aantalAf} afgevinkt in de voorraad zetten…</button></div>` : ""}
-    ${nakijken.length ? `<section class="categorie b-nakijken"><h2>Even nakijken <small>naar schatting bijna op: nog genoeg?</small></h2>
+    ${aantalAf ? `<div class="knoppen b-klaar"><button class="knop primair" id="naar-voorraad">${ikoon("check")}Klaar met winkelen (${aantalAf})</button></div>` : ""}
+    ${nakijken.length ? `<section class="categorie b-nakijken"><h2 class="met-ik">${ikoon("circle-help")}Even nakijken <small>bijna op?</small></h2>
       <ul class="blijst">${nakijken.map((x) => `<li class="b-item" data-slug="${esc(x.slug)}">
-        <span class="b-naam">${esc(x.ing.naam)}</span>
-        <small class="b-detail">naar schatting ±${nl(Math.min(100, Math.round(x.bijnaOp * 10) * 10))}% gebruikt sinds het kopen</small>
-        <span class="b-acties"><button class="knop klein" data-genoeg title="Er is nog genoeg: de app begint opnieuw met tellen">Nog genoeg</button>
-          <button class="knop klein" data-kopen title="Op de boodschappenlijst">Kopen</button></span></li>`).join("")}</ul></section>` : ""}
+        <span class="b-naam" title="Naar schatting ±${nl(Math.min(100, Math.round(x.bijnaOp * 10) * 10))}% gebruikt sinds het kopen">${esc(x.ing.naam)}</span>
+        <span class="b-acties"><button class="ikoonknop" data-genoeg title="Nog genoeg (de app begint opnieuw met tellen)" aria-label="Nog genoeg">${ikoon("check")}</button>
+          <button class="ikoonknop" data-kopen title="Op de lijst" aria-label="Op de lijst">${ikoon("shopping-cart")}</button></span></li>`).join("")}</ul></section>` : ""}
     ${inHuis.length ? `<details class="b-inhuis"><summary>Al in huis (${inHuis.length})</summary>
       <ul class="blijst">${inHuis.sort((a, b) => a.ing.naam.localeCompare(b.ing.naam, "nl")).map((x) => `<li class="b-item">
         <span class="b-naam">${esc(x.ing.naam)}</span>
@@ -190,11 +191,10 @@ export function boodschappen(main, data) {
           ? `: ${esc(toonPartijen(x.partijen.filter((p) => p.hoeveelheid != null), data))}` : ""}${x.status === "onzeker" ? " (genoeg?)" : ""}</small>
       </li>`).join("")}</ul>
       <p class="hint">Klopt iets niet? Pas het aan bij <a href="#/voorraad">Voorraad</a>.</p></details>` : ""}
-    ${inslaan.length ? `<section class="categorie b-slim"><h2>Slim inslaan <small>in de aanbieding en lang houdbaar</small></h2>
+    ${inslaan.length ? `<section class="categorie b-slim"><h2 class="met-ik">${ikoon("badge-percent")}Slim inslaan <small>aanbieding, lang houdbaar</small></h2>
       <ul class="blijst">${inslaan.map((x) => `<li class="b-item" data-slug="${esc(x.slug)}">
-        <span class="b-naam">${esc(x.ing.naam)}</span>${actieHtml(x.a, data)}
-        <small class="b-detail">${esc(actieDetail(x.a, data))}</small>
-        <span class="b-acties"><button class="knop klein" data-inslaan>+ Op de lijst</button></span></li>`).join("")}</ul></section>` : ""}
+        <span class="b-naam" title="${esc(actieDetail(x.a, data))}">${esc(x.ing.naam)}</span>${actieHtml(x.a, data)}
+        <span class="b-acties"><button class="ikoonknop" data-inslaan title="Op de lijst" aria-label="Op de lijst">${ikoon("shopping-cart")}</button></span></li>`).join("")}</ul></section>` : ""}
     ${winkel}
     ${verslag ? `<details class="b-verslag" open><summary>${esc(verslag.kop)}</summary>${verslag.html}</details>` : ""}`;
 
@@ -250,7 +250,6 @@ export function boodschappen(main, data) {
     const extra = b.closest("li").querySelector(".b-extra");
     extra.hidden = !extra.hidden;
     b.setAttribute("aria-expanded", String(!extra.hidden));
-    b.textContent = extra.hidden ? "▾" : "▴";
   }));
 
   // "Niet nodig" bij iets voor het menu of de vaste voorraad: "heb ik al", in de voorraad als genoeg in huis.
@@ -360,8 +359,7 @@ function afrekenen(data, gekocht, klaar) {
   dlg.className = "dialoog";
   dlg.innerHTML = `<form novalidate>
     <h2 class="dl-kop">Klaar met winkelen</h2>
-    <p class="hint">Klopt het? Pas aan wat je anders kocht, bijvoorbeeld een pot in plaats van een pak. Geen
-      hoeveelheid = "in huis, genoeg". Vink uit wat je niet gekocht hebt: dat blijft op de lijst.</p>
+    <p class="hint">Pas aan wat je anders kocht. Leeg = "in huis"; uitgevinkt blijft op de lijst.</p>
     <ul class="afrekenen">${items.map((it, i) => `<li data-i="${i}">
       <label class="vink ar-naam"><input type="checkbox" data-mee checked> <b>${esc(it.r.naam)}</b></label>
       <div class="ar-regels">${it.regels.map((x) => regelHtml(it, x)).join("")}</div>

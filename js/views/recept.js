@@ -3,6 +3,7 @@ import { dagenTot, datumNl, esc, euro, geleden, hoeveelheid, nl, weekdag } from 
 import { MOMENT_NAAM, dekking, kookbeurtOpMenu, momentVan, zelfGegeten } from "../planning.js";
 import { gekookt } from "./gekookt.js";
 import { inplannen } from "./menu.js";
+import { ikoon } from "../iconen.js";
 
 // Gekozen porties en keuze per recept, zolang de pagina open is (ook gebruikt door de kookstand).
 const staat = {};
@@ -68,19 +69,19 @@ export function recept(main, data, id) {
   // Wat je ervan in huis hebt, voor dit aantal porties (alleen als je een voorraad bijhoudt).
   const dek = data.voorraad.ingredienten.length ? dekking(r, data, s.porties, s.keuze) : null;
   const inHuis = !dek || !dek.totaal ? ""
-    : `<p class="in-huis">${dek.ontbreekt.length ? `<b>Nog kopen:</b> ${esc(dek.ontbreekt.slice(0, 4).join(", ").toLowerCase())}${
-      dek.ontbreekt.length > 4 ? ` en nog ${dek.ontbreekt.length - 4}` : ""}` : "✓ Alles in huis"}${
-      dek.gauw.length ? ` · <span class="rk-gauw">gebruikt ${esc(dek.gauw.map((x) => x.naam.toLowerCase()).join(", "))} (gauw op)</span>` : ""}</p>`;
+    : `<p class="in-huis">${dek.ontbreekt.length ? `<b>${ikoon("shopping-cart")}Nog kopen:</b> ${esc(dek.ontbreekt.slice(0, 4).join(", ").toLowerCase())}${
+      dek.ontbreekt.length > 4 ? ` en nog ${dek.ontbreekt.length - 4}` : ""}` : `<span class="goed">${ikoon("check")}Alles in huis</span>`}${
+      dek.gauw.length ? ` · <span class="rk-gauw">${ikoon("triangle-alert")}${esc(dek.gauw.map((x) => x.naam.toLowerCase()).join(", "))} gauw op</span>` : ""}</p>`;
 
   main.innerHTML = `
     <div class="actiebalk">
       <a class="terug" href="#/recepten">← Recepten</a>
       <span class="acties">
-        <a class="knop klein primair" href="#/recept/${esc(id)}/koken">Koken</a>
-        ${opMenu ? `<a class="knop klein" href="#/" title="Staat op het menu">✓ ${gepland ? esc(`${weekdag(gepland.dag)} ${MOMENT_NAAM[momentVan(gepland, data)].toLowerCase()}`) : "Op het menu"}</a>`
-          : `<button class="knop klein" data-plan title="Kies een dag en maaltijd">Inplannen</button>`}
-        <button class="knop klein" data-gekookt>Gekookt…</button>
-        <a class="knop klein alleen-laptop" href="#/recept/${esc(id)}/bewerken">Bewerken</a>
+        <a class="knop klein primair" href="#/recept/${esc(id)}/koken" title="Kookstand: stap voor stap">${ikoon("chef-hat")}Koken</a>
+        ${opMenu ? `<a class="knop klein" href="#/" title="Staat op het menu">${ikoon("calendar")}${gepland ? esc(`${weekdag(gepland.dag)} ${MOMENT_NAAM[momentVan(gepland, data)].toLowerCase()}`) : "Op het menu"}</a>`
+          : `<button class="knop klein" data-plan title="Kies een dag en maaltijd">${ikoon("calendar-plus")}Inplannen</button>`}
+        <button class="knop klein" data-gekookt title="In het logboek, porties bewaren">${ikoon("check")}Gekookt</button>
+        <a class="ikoonknop alleen-laptop" href="#/recept/${esc(id)}/bewerken" title="Bewerken" aria-label="Bewerken">${ikoon("pencil")}</a>
       </span>
     </div>
     <article class="kaart">
