@@ -4,13 +4,24 @@ export const VOEDING_KEYS = ["kcal", "vet", "koolhydraten", "eiwit"];
 
 // Het ingrediënt om mee te rekenen. Een algemene soort ("Tofu") met een `standaard`-variant
 // neemt alles wat hij zelf niet invult over van die variant (voedingswaarde, prijs, gewicht
-// per stuk/verpakking…). Gelijk houden met reken_ing in tools/mealdata.py.
+// per stuk/verpakking…). Iets dat "komt uit" iets anders (citroensap uit citroenen) krijgt
+// zonder eigen prijs de prijs daarvan, omgerekend via het gewicht van één stuk.
+// Gelijk houden met reken_ing in tools/mealdata.py.
 export function rekenIng(ingredienten, slug) {
   const ing = ingredienten[slug];
   const v = ing?.standaard && ingredienten[ing.standaard];
-  if (!v) return ing;
-  const eigen = Object.fromEntries(Object.entries(ing).filter(([, w]) => w != null));
-  return { ...v, ...eigen, gram_per: { ...(v.gram_per || {}), ...(ing.gram_per || {}) } };
+  let uit = ing;
+  if (v) {
+    const eigen = Object.fromEntries(Object.entries(ing).filter(([, w]) => w != null));
+    uit = { ...v, ...eigen, gram_per: { ...(v.gram_per || {}), ...(ing.gram_per || {}) } };
+  }
+  const bron = uit?.komt_uit && ingredienten[uit.komt_uit];
+  if (bron && !bron.komt_uit && uit.prijs_per_kg == null) {
+    const b = rekenIng(ingredienten, uit.komt_uit);
+    const per = b.gram_per?.stuk, eigen = uit.gram_per?.stuk;
+    if (b.prijs_per_kg != null && per && eigen) uit = { ...uit, prijs_per_kg: b.prijs_per_kg * per / eigen };
+  }
+  return uit;
 }
 
 export function gram(regel, ing, eenheden) {

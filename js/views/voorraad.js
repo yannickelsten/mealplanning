@@ -1,7 +1,7 @@
 import { bewaarIngredient, laad, wijzig } from "../store.js";
 import { gram } from "../voeding.js";
-import { aansnijdbaar, BIJNA_OP, bewaren, gauwOp, geschatGebruikt, ingVan, minimumVan, openen, opTegen, perStuk, PLEKKEN,
-  rond, soortVan, standaardPlek, toonHoeveelheid, toonPartij, voorraadEenheden } from "../planning.js";
+import { aansnijdbaar, BIJNA_OP, bewaren, bijnaOp, eersteOptie, gauwOp, geschatGebruikt, ingVan, minimumVan, openen, opTegen, perStuk,
+  PLEKKEN, rond, soortVan, standaardPlek, toonPartij, verpakkingOpties, voorraadEenheden } from "../planning.js";
 import { dagenTot, datumNl, esc, houdbaar, melding, nieuwId, vandaag } from "../util.js";
 import { aantalPorties, koppelPorties, oudePorties, portiesHtml } from "./porties.js";
 
@@ -41,27 +41,29 @@ function opBadge(p, data) {
   return `<span class="badge${n <= 3 ? " waarsch" : ""}" title="Op voor ${esc(datumNl(datum))}${p.tht ? " (tht)" : " (bewaaradvies)"}">${tekst}</span>`;
 }
 
-// "in huis", met een schatting hoeveel er nog is als je er al mee gekookt hebt.
+// "in huis", met een schatting hoeveel er nog is als je er al mee gekookt hebt. "bijna op?"
+// volgt dezelfde regel als de boodschappenlijst (kruiden hooguit eens per maand).
 function inHuisTekst(p, data) {
   const g = geschatGebruikt(p, data);
-  if (g == null || g < 0.1) return `<small>in huis</small>`;
-  const rest = Math.max(0, 100 - Math.round(g * 10) * 10);
   const titel = "Geschat uit wat je sinds het kopen gekookt hebt";
-  return g >= BIJNA_OP ? `<span class="badge waarsch" title="${titel}">bijna op?</span>`
-    : `<small title="${titel}">in huis · nog ±${rest}%</small>`;
+  if (bijnaOp([p], data) != null) return `<span class="badge waarsch" title="${titel}">bijna op?</span>`;
+  if (g == null || g < 0.1 || g >= BIJNA_OP) return `<small>in huis</small>`;
+  return `<small title="${titel}">in huis · nog ±${Math.max(0, 100 - Math.round(g * 10) * 10)}%</small>`;
 }
 
-// De partijen van één ingrediënt vóór een actie, en een functie die ze terugzet (voor
+// De partijen van één soort (alle varianten) vóór een actie, en een functie die ze terugzet (voor
 // "Ongedaan maken"). Met `logId` gaat ook die regel uit het logboek (weggegooid/opgemaakt).
-const kopie = (data, slug) => data.voorraad.ingredienten.filter((x) => x.ingredient === slug).map((x) => ({ ...x }));
-const terugzetten = (slug, voor, logId = null) => async () => {
+const vanSoort = (data, slug) => (x) => soortVan(data, x.ingredient) === soortVan(data, slug);
+const kopie = (data, slug) => data.voorraad.ingredienten.filter(vanSoort(data, slug)).map((x) => ({ ...x }));
+const terugzetten = (data, slug, voor, logId = null) => async () => {
   if (logId) {
     await wijzig("logboek", (doc) => {
       doc.weggegooid = doc.weggegooid.filter((x) => x.id !== logId);
       doc.opgemaakt = (doc.opgemaakt || []).filter((x) => x.id !== logId);
     });
   }
-  await wijzig("voorraad", (doc) => { doc.ingredienten = [...doc.ingredienten.filter((x) => x.ingredient !== slug), ...voor]; });
+  const zelfde = vanSoort(data, slug);
+  await wijzig("voorraad", (doc) => { doc.ingredienten = [...doc.ingredienten.filter((x) => !zelfde(x)), ...voor]; });
 };
 
 // Een partij weghalen, altijd met "Ongedaan maken":
@@ -80,7 +82,7 @@ async function weghalen(data, p, hoe) {
     });
   }
   const d = await wijzig("voorraad", (doc) => { doc.ingredienten = doc.ingredienten.filter((x) => x.id !== p.id); });
-  melding({ op: `${naam} is op`, weg: `${naam} weggegooid`, fout: `${naam} verwijderd` }[hoe], terugzetten(p.ingredient, voor, logId));
+  melding({ op: `${naam} is op`, weg: `${naam} weggegooid`, fout: `${naam} verwijderd` }[hoe], terugzetten(data, p.ingredient, voor, logId));
   return d;
 }
 
@@ -186,7 +188,7 @@ export function voorraad(main, data) {
         const b = bewaren(ri, data);
         const waar = b.open_plek !== p.plek ? `, bewaren in de ${b.open_plek}` : "";
         melding(perStuk(ri) ? `Eén ${ri.stuknaam?.[0] || "stuk"} aangesneden: binnen ±${b.open} dagen op${waar}. De rest blijft heel.`
-          : `${naam} is open: binnen ±${b.open} dagen op${waar}`, terugzetten(p.ingredient, voor));
+          : `${naam} is open: binnen ±${b.open} dagen op${waar}`, terugzetten(data, p.ingredient, voor));
         herteken(d);
       }, fout);
     } else {
@@ -204,11 +206,23 @@ export function voorraad(main, data) {
 // Toevoegen (p null) of wijzigen van een partij.
 function partijDialoog(data, p, klaar) {
   const e = data.eenheden;
-  let slug = p?.ingredient || null;
-  // Het gekozen ingrediënt om mee te rekenen (een algemene soort met de waarden van zijn standaardmerk).
-  const huidig = () => (slug ? ingVan(data, slug) : null);
-  const verpakking = (i) => Object.keys(i?.gram_per || {}).find((k) => e[k]?.verpakking);
-  const beginEenheid = (i) => verpakking(i) || (i?.gram_per?.stuk ? "stuk" : "g");
+  let slug = p?.ingredient || null; // wat bij "Ingrediënt" gekozen is (kan een variant zijn)
+  // "Wat": de verpakkingen van de soort en zijn varianten ("pot (400g) · Kikkererwten (Pot)"),
+  // of losse eenheden. De keuze bepaalt ook de variant van de partij (zie verpakkingOpties).
+  let opties = [];
+  const keuze = () => opties.find((o) => o.waarde === form.wat.value) || null;
+  // Het ingrediënt van de partij (de gekozen variant), om mee te rekenen.
+  const huidig = () => { const s = keuze()?.slug || slug; return s ? ingVan(data, s) : null; };
+  const vulOpties = () => {
+    opties = slug ? verpakkingOpties(data, slug, { vrij: true })
+      : voorraadEenheden(e).map((x) => ({ waarde: `|${x}`, slug: null, eenheid: x, tekst: x === "stuk" ? "stuks" : x }));
+    if (p?.eenheid && !opties.some((o) => o.slug === p.ingredient && o.eenheid === p.eenheid)) {
+      opties.unshift({ waarde: `${p.ingredient}|${p.eenheid}`, slug: p.ingredient, eenheid: p.eenheid, tekst: p.eenheid });
+    }
+    // Bestaande partij: wat er stond; anders de verpakking van het gekozen merk, of de eerste (wat je normaal koopt).
+    const gekozen = (p?.eenheid && `${p.ingredient}|${p.eenheid}`) || eersteOptie(opties, slug)?.waarde;
+    form.wat.innerHTML = opties.map((o) => `<option value="${esc(o.waarde)}" ${o.waarde === gekozen ? "selected" : ""}>${esc(o.tekst)}</option>`).join("");
+  };
   const dlg = document.createElement("dialog");
   dlg.className = "dialoog";
   dlg.innerHTML = `<form novalidate>
@@ -218,17 +232,17 @@ function partijDialoog(data, p, klaar) {
       ${ingredientKeuzelijst(data, "v-ingredienten")}
       <small>Staat het er niet bij? Maak het eerst aan bij <a href="#/ingredient/nieuw">Ingrediënten</a>.</small></label>`}
     <div class="twee">
-      <label class="veld"><span>Hoeveelheid</span><input name="hoeveelheid" type="number" step="any" min="0"
+      <label class="veld"><span>Hoeveel</span><input name="hoeveelheid" type="number" step="any" min="0"
         value="${p?.hoeveelheid ?? ""}" placeholder="leeg = genoeg"></label>
-      <label class="veld"><span>Eenheid</span><select name="eenheid">${voorraadEenheden(e).map((x) =>
-        `<option ${x === (p?.eenheid || beginEenheid(huidig())) ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+      <label class="veld"><span>Wat</span><select name="wat"></select></label>
     </div>
     <label class="veld" data-gewicht hidden><span></span>
       <input name="gewicht" type="number" step="any" min="0" placeholder="bv. 500">
-      <small>Wordt bij het ingrediënt bewaard, zodat de app stuks/verpakkingen kan omrekenen naar recepten.</small></label>
+      <small>Wordt bij het ingrediënt bewaard, zodat de app stuks/verpakkingen kan omrekenen naar recepten.
+        <span data-uitlek hidden>Bij blikken en potten: het uitlekgewicht, zoals in recepten.</span></small></label>
     <div class="twee">
       <label class="veld"><span>Waar</span><select name="plek">${PLEKKEN.map(([x, n]) =>
-        `<option value="${x}" ${x === (p?.plek || (huidig() && standaardPlek(huidig(), data))) ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        `<option value="${x}" ${x === (p?.plek || (slug && standaardPlek(ingVan(data, slug), data))) ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="veld"><span>Gekocht</span><input name="gekocht" type="date" max="${vandaag()}" value="${p ? p.gekocht || "" : vandaag()}"></label>
     </div>
     <div class="twee">
@@ -259,21 +273,29 @@ function partijDialoog(data, p, klaar) {
   let plekGekozen = !!p;
   form.plek.addEventListener("change", () => { plekGekozen = true; });
 
-  // Vraag het gewicht per stuk/verpakking als het ingrediënt dat nog niet weet.
+  vulOpties();
+  const eenheidNu = () => keuze()?.eenheid || "g";
+  const partijSlug = () => keuze()?.slug || slug;
+  // Vraag het gewicht per stuk/verpakking als het ingrediënt dat nog niet weet. Staat het in de
+  // Jumbo-link ("volgens Jumbo"), dan is het al ingevuld.
+  form.gewicht.addEventListener("input", () => { form.gewicht.dataset.zelf = "1"; });
   const nodigGewicht = () => {
     const ing = huidig();
-    const eh = form.eenheid.value;
+    const eh = eenheidNu();
     return ing && form.hoeveelheid.value.trim() !== "" && (eh === "stuk" || e[eh]?.verpakking)
       && gram({ hoeveelheid: 1, eenheid: eh }, ing, e) == null;
   };
   const bijwerken = () => {
     gewichtVeld.hidden = !nodigGewicht();
-    gewichtVeld.querySelector("span").textContent = `Gewicht per ${form.eenheid.value} (gram)`;
+    gewichtVeld.querySelector("span").textContent = `Gewicht per ${eenheidNu()} (gram)`;
+    const o = keuze();
+    if (o?.nieuw && !form.gewicht.dataset.zelf) form.gewicht.value = o.gram;
     const ing = huidig();
+    gewichtVeld.querySelector("[data-uitlek]").hidden = !["blik", "pot"].includes(eenheidNu());
     if (!ing) { advies.textContent = ""; return; }
     const b = bewaren(ing, data);
     const voorbeeld = { plek: form.plek.value, gekocht: form.gekocht.value || null, geopend: form.geopend.value || null, tht: form.tht.value || null };
-    const op = opTegen({ ...voorbeeld, ingredient: slug }, data);
+    const op = opTegen({ ...voorbeeld, ingredient: partijSlug() }, data);
     advies.textContent = `Bewaaradvies: ${PLEKNAAM[b.plek].toLowerCase()}, ${perStuk(ing)
       ? `heel ±${b.dagen} dagen (ook als je er een paar uit de zak haalt), aangesneden ±${b.open} dagen`
       : `dicht ±${b.dagen} dagen, na openen ±${b.open} dagen`}`
@@ -283,19 +305,29 @@ function partijDialoog(data, p, klaar) {
   const toonMinimum = () => {
     const m = slug && minimumVan(data, slug);
     form.minimum.value = m ? m.hoeveelheid : "";
-    form.min_eenheid.value = m?.eenheid || form.eenheid.value;
+    form.min_eenheid.value = m?.eenheid || (voorraadEenheden(e).includes(eenheidNu()) ? eenheidNu() : "g");
   };
-  form.ingredient?.addEventListener("change", () => {
-    slug = vindIngredient(data, form.ingredient.value);
+  // Ingrediënt gekozen (uit de lijst, of getypt): de keuzes bij "Wat" horen daarbij.
+  const ingredientGekozen = () => {
+    const nieuw = vindIngredient(data, form.ingredient.value);
+    if (nieuw === slug) return;
+    slug = nieuw;
+    vulOpties();
+    delete form.gewicht.dataset.zelf;
     const ing = huidig();
-    if (ing) {
-      if (!plekGekozen) form.plek.value = standaardPlek(ing, data);
-      form.eenheid.value = beginEenheid(ing);
-    }
+    if (ing && !plekGekozen) form.plek.value = standaardPlek(ing, data);
     toonMinimum();
     bijwerken();
+  };
+  form.ingredient?.addEventListener("input", ingredientGekozen);
+  form.ingredient?.addEventListener("change", ingredientGekozen);
+  form.wat.addEventListener("change", () => {
+    delete form.gewicht.dataset.zelf;
+    const ing = huidig();
+    if (ing && !plekGekozen) form.plek.value = standaardPlek(ing, data);
+    bijwerken();
   });
-  for (const veld of ["eenheid", "hoeveelheid", "plek", "gekocht", "geopend", "tht"]) form[veld].addEventListener("input", bijwerken);
+  for (const veld of ["hoeveelheid", "plek", "gekocht", "geopend", "tht"]) form[veld].addEventListener("input", bijwerken);
   toonMinimum();
   bijwerken();
 
@@ -315,11 +347,12 @@ function partijDialoog(data, p, klaar) {
       const k = t ? kandidaten(data, t).map((x) => data.ingredienten[x].naam) : [];
       return toonFout(k.length > 1 && k.length <= 8 ? `Welke bedoel je: ${k.join(", ")}?` : "Kies een ingrediënt uit de lijst.");
     }
-    const ing = huidig();
+    const lot = partijSlug(); // de gekozen variant (pot of pak), anders het ingrediënt zelf
+    const ing = ingVan(data, lot);
     const hTekst = form.hoeveelheid.value.trim();
     const h = hTekst === "" ? null : Number(hTekst.replace(",", "."));
     if (h != null && !(h > 0)) return toonFout("Vul een hoeveelheid groter dan 0 in, of laat het leeg.");
-    const eenheid = form.eenheid.value;
+    const eenheid = eenheidNu();
     if (form.geopend.value && form.gekocht.value && form.geopend.value < form.gekocht.value) {
       return toonFout("Geopend kan niet vóór gekocht liggen.");
     }
@@ -348,7 +381,7 @@ function partijDialoog(data, p, klaar) {
       if (!(g > 0)) return toonFout(`Vul in hoeveel gram één ${eenheid} weegt, dan kan de app ermee rekenen.`);
       // Bij een algemene soort hoort het gewicht bij het standaardmerk. Altijd het eigen
       // ingrediënt opslaan, nooit de samengevoegde rekenversie.
-      const doel = data.ingredienten[slug].standaard || slug;
+      const doel = data.ingredienten[lot].standaard || lot;
       const eigen = data.ingredienten[doel];
       try {
         await bewaarIngredient(doel, { ...eigen, gram_per: { ...(eigen.gram_per || {}), [eenheid]: g } });
@@ -366,20 +399,21 @@ function partijDialoog(data, p, klaar) {
       ...(form.tht.value ? { tht: form.tht.value } : {}),
       ...(p?.geteld && h == null ? { geteld: p.geteld } : {}),
     };
-    const voor = kopie(data, slug);
+    // Ongedaan maken zet de hele soort terug (de partij kan van variant veranderd zijn).
+    const voor = kopie(data, p?.ingredient || lot);
     opslaan((doc) => {
       if (p) {
         const i = doc.ingredienten.findIndex((x) => x.id === p.id);
-        const nieuw = { id: p.id, ingredient: slug, ...velden };
+        const nieuw = { id: p.id, ingredient: lot, ...velden };
         if (i >= 0) doc.ingredienten[i] = nieuw; else doc.ingredienten.push(nieuw);
         return;
       }
       // Zelfde dag gekocht, zelfde plek en eenheid, nog dicht: optellen bij die partij.
-      const zelfde = h != null && !velden.geopend && !velden.tht && doc.ingredienten.find((x) => x.ingredient === slug
+      const zelfde = h != null && !velden.geopend && !velden.tht && doc.ingredienten.find((x) => x.ingredient === lot
         && !x.geopend && !x.tht && x.plek === velden.plek && x.eenheid === eenheid && x.gekocht === velden.gekocht && x.hoeveelheid != null);
       if (zelfde) zelfde.hoeveelheid = rond(zelfde.hoeveelheid + velden.hoeveelheid, eenheid, e);
-      else doc.ingredienten.push({ id: nieuwId(), ingredient: slug, ...velden });
-    }, p ? "Opgeslagen" : `${ing.naam} staat in de voorraad`, terugzetten(slug, voor));
+      else doc.ingredienten.push({ id: nieuwId(), ingredient: lot, ...velden });
+    }, p ? "Opgeslagen" : `${ing.naam} staat in de voorraad`, terugzetten(data, p?.ingredient || lot, voor));
   });
   dlg.showModal();
   (form.ingredient || form.hoeveelheid).focus();

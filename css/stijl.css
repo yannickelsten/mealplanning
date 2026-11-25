@@ -589,18 +589,20 @@ legend { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; co
 .b-detail { color: var(--zacht); flex-basis: 100%; padding-left: 28px; order: 3; }
 .b-acties { display: flex; gap: 4px; margin-left: auto; }
 .b-item.af .b-naam, .b-item.af .b-hv { text-decoration: line-through; color: var(--zacht); }
-.b-aantal {
-  flex-basis: 100%; order: 4; padding-left: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-  font-size: .85rem; color: var(--zacht);
-}
-.b-aantal input, .b-aantal select {
-  font: inherit; color: var(--inkt); background: var(--kaart);
-  border: 1px solid var(--lijn); border-radius: 8px; padding: 3px 8px;
-}
-.b-aantal input { width: 5.5em; text-align: right; }
-.b-aantal .stapper { width: 28px; height: 28px; font-size: 1rem; }
-.b-aantal small { color: var(--accent); }
+.b-nakijken .b-detail { flex-basis: auto; padding-left: 0; order: 0; }
 .b-klaar { margin: 20px 0; }
+/* "Klaar met winkelen": per ingrediënt wat je kocht (hoeveel + welke verpakking) en waar het heen gaat */
+.afrekenen { list-style: none; margin: 0; padding: 0; max-height: 58vh; overflow-y: auto; }
+.afrekenen > li { padding: 8px 0; border-bottom: 1px solid var(--lijn); display: grid; gap: 6px; }
+.afrekenen > li.niet .ar-regels, .afrekenen > li.niet .ar-onder { display: none; }
+.afrekenen > li.niet b { color: var(--zacht); text-decoration: line-through; }
+.ar-naam { color: var(--inkt); }
+.ar-regels { display: grid; gap: 6px; padding-left: 26px; }
+.ar-regel { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.ar-regel input, .ar-regel select, .ar-onder select { font: inherit; font-size: .9rem; color: inherit; background: var(--kaart); min-width: 0;
+  border: 1px solid var(--lijn); border-radius: 8px; padding: 6px 4px 6px 8px; }
+.ar-regel input { text-align: right; }
+.ar-onder { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-left: 26px; }
 .b-inhuis { margin-top: 28px; }
 .b-inhuis summary { cursor: pointer; font: 400 1.2rem var(--serif); margin-bottom: 8px; }
 .b-inhuis .b-detail { flex-basis: auto; padding-left: 0; order: 0; margin-left: auto; }

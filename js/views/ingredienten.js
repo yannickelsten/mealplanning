@@ -1,6 +1,7 @@
 import { bewaarIngredient, laad } from "../store.js";
 import { rekenIng, VOEDING_KEYS } from "../voeding.js";
 import { datumNl, esc, euro, groepNaam, melding, nl, slugVan, terugNaar } from "../util.js";
+import { pakVanLink } from "../planning.js";
 
 const ROLLEN = ["eiwitbron", "peulvrucht", "groente", "fruit", "koolhydraat", "zuivel",
   "smaakmaker", "kruid", "vet", "snack", "overig"];
@@ -183,6 +184,18 @@ export function ingredientForm(main, data, slug) {
           worden: zie <a href="#/ingredient/${esc(ing.soort)}">${esc(naamVan(ing.soort))}</a>.</p>`
       : productVeld + prijsVeld + altVeld + variantVan;
   const geerfd = (k) => (std && ing.per_100g == null ? ` placeholder="${waarde(std.per_100g?.[k])}"` : "");
+  // "Komt uit": je koopt het als iets anders (citroensap → citroenen). Niet bij varianten.
+  const bronnen = Object.entries(data.ingredienten)
+    .filter(([s, i]) => s !== slug && !i.komt_uit && !i.soort && !i.altijd_in_huis)
+    .sort(([, a], [, b]) => a.naam.localeCompare(b.naam, "nl"));
+  const komtUitVeld = isVariant || mijnVarianten.length ? "" : `<div class="vier">
+    ${veld("Komt uit", `<select name="komt_uit"><option value="">niets: je koopt het zo</option>${bronnen.map(([s, i]) =>
+      `<option value="${esc(s)}" ${s === ing.komt_uit ? "selected" : ""}>${esc(i.naam)}</option>`).join("")}</select>`,
+      "bv. citroensap komt uit citroenen: op de boodschappenlijst en in de voorraad telt dan de citroen")}
+    <span data-opbrengst${ing.komt_uit ? "" : " hidden"}>${veld("Eén stuk geeft (g of ml)",
+      `<input name="opbrengst" type="number" step="any" min="0" value="${waarde(ing.komt_uit ? ing.gram_per?.stuk : null)}" placeholder="bv. 40">`,
+      "het sap van één citroen is ±40 ml")}</span>
+  </div>`;
 
   main.innerHTML = `
     <a class="terug" href="#/ingredienten">← Ingrediënten</a>
@@ -197,7 +210,8 @@ export function ingredientForm(main, data, slug) {
         ${veld("Filterlabel", `<input name="tag" value="${waarde(ing.tag)}">`, "bv. 'kip' of 'tofu', voor het filteren van recepten")}
       </fieldset>
       <fieldset><legend>Wat je koopt</legend>
-        ${koopVelden}
+        ${komtUitVeld}
+        <div data-koop${ing.komt_uit ? " hidden" : ""}>${koopVelden}</div>
       </fieldset>
       <fieldset><legend>Voedingswaarde per 100 g</legend>
         <div class="vier">
@@ -210,7 +224,7 @@ export function ingredientForm(main, data, slug) {
       </fieldset>
       <fieldset><legend>Omrekenen</legend>
         <div class="vier">
-          ${veld("Gram per stuk", `<input name="stuk" type="number" step="any" min="0" value="${waarde(ing.gram_per?.stuk)}">`, "bv. 1 ui = 100")}
+          <span data-gramstuk${ing.komt_uit ? " hidden" : ""}>${veld("Gram per stuk", `<input name="stuk" type="number" step="any" min="0" value="${waarde(ing.komt_uit ? null : ing.gram_per?.stuk)}">`, "bv. 1 ui = 100")}</span>
           ${veld("Dichtheid (g/ml)", `<input name="dichtheid" type="number" step="any" min="0" value="${waarde(ing.dichtheid)}">`, "alleen als niet ±1, bv. olie 0,92")}
         </div>
       </fieldset>
@@ -237,6 +251,9 @@ export function ingredientForm(main, data, slug) {
       <fieldset><legend>Kenmerken</legend>
         <label class="vink"><input type="checkbox" name="vlees" ${ing.vlees ? "checked" : ""}> vlees of vis (niet vegetarisch)</label>
         <label class="vink"><input type="checkbox" name="verwaarloosbaar" ${ing.verwaarloosbaar ? "checked" : ""}> verwaarloosbaar (kruiden, zout: telt niet mee)</label>
+        <label class="vink"><input type="checkbox" name="altijd_in_huis" ${ing.altijd_in_huis ? "checked" : ""}> altijd in huis (water): nooit op de boodschappenlijst of in de voorraad</label>
+        ${isVariant ? `<label class="vink"><input type="checkbox" name="eigen_weging" ${ing.eigen_weging ? "checked" : ""}> anders gewogen dan
+          ${esc(naamVan(ing.soort))} (bv. incl. vocht): telt apart op de boodschappenlijst en in de voorraad</label>` : ""}
         <label class="vink"><input type="checkbox" name="controleren" ${ing.controleren ? "checked" : ""}> nog controleren</label>
         ${ing.bron ? `<p class="hint">Bron: ${esc(ing.bron)}</p>` : ""}
       </fieldset>
@@ -249,6 +266,7 @@ export function ingredientForm(main, data, slug) {
 
   const form = main.querySelector("form");
   const foutEl = form.querySelector(".fout");
+  const getalVeld = (n) => (form[n]?.value.trim() ? Number(form[n].value) : null);
   const slugEl = form.querySelector("#slug");
   if (slugEl) form.naam.addEventListener("input", () => { slugEl.textContent = slugVan(form.naam.value) || "–"; });
   // Hoeveel stuks er in een verpakking zitten: "= ±10 stuks".
@@ -267,6 +285,24 @@ export function ingredientForm(main, data, slug) {
     blok.querySelector("input, textarea").focus();
   }));
   form.standaard?.addEventListener("change", () => { form.querySelector("[data-eigen-product]").hidden = Boolean(form.standaard.value); });
+  // Komt uit iets anders: dan koop je dat, dus geen eigen product, prijs of gewicht per stuk.
+  form.komt_uit?.addEventListener("change", () => {
+    const aan = Boolean(form.komt_uit.value);
+    form.querySelector("[data-opbrengst]").hidden = !aan;
+    form.querySelector("[data-koop]").hidden = aan;
+    form.querySelector("[data-gramstuk]").hidden = aan;
+  });
+  // Een Jumbo-link geplakt en nog geen verpakking: die uit de link alvast invullen (controleer bij
+  // blikken en potten het uitlekgewicht).
+  form.product?.addEventListener("change", () => {
+    if (form.verpakking.value) return;
+    const l = pakVanLink({ product: schoonAdres(form.product.value), gram_per: { stuk: getalVeld("stuk") }, dichtheid: getalVeld("dichtheid") });
+    if (!l) return;
+    form.verpakking.value = l.eenheid;
+    form.verpakking_g.value = l.gram;
+    stuksTonen();
+    melding(`Verpakking ingevuld uit de link: ${l.eenheid} van ${l.gram} g${["blik", "pot"].includes(l.eenheid) ? ". Recepten rekenen met het uitlekgewicht: klopt het?" : ""}`);
+  });
   // Zelf een prijs getypt terwijl er een product is: die wordt bij bijwerken weer de Jumboprijs.
   form.prijs_per_kg.addEventListener("input", () => {
     if (form.product.value.trim() && !form.standaard?.value) form.querySelector("[data-prijshint]").textContent = "wordt bij bijwerken weer de Jumboprijs";
@@ -306,6 +342,14 @@ export function ingredientForm(main, data, slug) {
     }
     const gp = { ...(ing.gram_per || {}) };
     if (getal("stuk") != null) gp.stuk = getal("stuk"); else delete gp.stuk;
+    // Komt uit iets anders: gram_per.stuk is wat één stuk daarvan oplevert (het sap van één citroen).
+    if (form.komt_uit?.value) {
+      if (!(getal("opbrengst") > 0)) return fout(`Vul in hoeveel één ${naamVan(form.komt_uit.value).toLowerCase()} oplevert (g of ml).`);
+      gp.stuk = getal("opbrengst");
+      uit.komt_uit = form.komt_uit.value;
+    } else if (form.komt_uit) {
+      delete uit.komt_uit;
+    }
     for (const x of verpakkingen) delete gp[x];
     if (form.verpakking.value) {
       if (!(getal("verpakking_g") > 0)) return fout(`Vul in hoeveel gram één ${form.verpakking.value} weegt.`);
@@ -321,6 +365,8 @@ export function ingredientForm(main, data, slug) {
     const sn = form.stuknaam.value.split("/").map((x) => x.trim()).filter(Boolean);
     const opt = { tag: form.tag.value.trim() || null, dichtheid: getal("dichtheid"),
       vlees: form.vlees.checked || null, verwaarloosbaar: form.verwaarloosbaar.checked || null,
+      altijd_in_huis: form.altijd_in_huis.checked || null,
+      eigen_weging: (uit.soort && form.eigen_weging?.checked) || null,
       controleren: form.controleren.checked || null, per_stuk: form.per_stuk.checked || null,
       stuknaam: sn.length ? [sn[0], sn[1] || `${sn[0]}s`] : null };
     for (const [k, v] of Object.entries(opt)) { if (v == null) delete uit[k]; else uit[k] = v; }

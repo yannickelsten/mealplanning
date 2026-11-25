@@ -49,7 +49,12 @@ export const standaardPlek = (ing, data) => bewaren(ing, data).plek;
 
 // Varianten (merken) van hetzelfde product horen bij een algemene soort: "Tofu (Jumbo)" en
 // "Tofu (Singh Tahoe)" zijn allebei "tofu". Voorraad en boodschappen kijken naar de soort.
-export const soortVan = (data, slug) => data.ingredienten[slug]?.soort || slug;
+// Een variant die anders gewogen wordt (bonen "incl. vocht", `eigen_weging`) telt apart: 340 g
+// met vocht is geen 340 g uitgelekte bonen.
+export const soortVan = (data, slug) => {
+  const i = data.ingredienten[slug];
+  return i?.soort && !i.eigen_weging ? i.soort : slug;
+};
 // Het ingrediënt om mee te rekenen (een soort neemt waarden over van zijn standaardvariant).
 export const ingVan = (data, slug) => rekenIng(data.ingredienten, slug);
 
@@ -127,6 +132,22 @@ export function* bladRegels(recept, data, keuze, factor = 1, stapel = [], onderd
   }
 }
 
+// Wat je koopt voor een receptregel (× factor): {slug: de soort, q: hoeveelheid of null, ing: om
+// q mee om te rekenen}, of null als er niets te kopen valt (vrije tekst, of "altijd in huis" zoals
+// water). Citroensap "komt uit" citroenen: 2 el sap = ¾ citroen (gram_per.stuk = het sap van één).
+export function koopVorm(regel, factor, data) {
+  const eigen = data.ingredienten[regel.ingredient];
+  if (!eigen || eigen.altijd_in_huis) return null;
+  let q = regel.hoeveelheid == null ? null : { hoeveelheid: regel.hoeveelheid * factor, eenheid: regel.eenheid };
+  const bron = eigen.komt_uit && data.ingredienten[eigen.komt_uit];
+  if (!bron) return { slug: soortVan(data, regel.ingredient), q, ing: ingVan(data, regel.ingredient) };
+  if (q) {
+    const stuks = omrekenen(q, "stuk", ingVan(data, regel.ingredient), data.eenheden);
+    q = stuks == null ? null : { hoeveelheid: stuks, eenheid: "stuk" };
+  }
+  return { slug: soortVan(data, eigen.komt_uit), q, ing: ingVan(data, eigen.komt_uit) };
+}
+
 // Factor t.o.v. het recept: 6 porties van een recept voor 3 = 2. Bij basisrecepten
 // (porties null) is `porties` het aantal keer.
 export const factorVoor = (recept, porties) => (porties ?? recept.porties ?? 1) / (recept.porties || 1);
@@ -177,8 +198,9 @@ function optellen(lijst, q, ing, eenheden) {
 // Wat er per soort nodig is voor een lijst gerechten [{recept, porties, keuze, dag?}].
 // Map soort → {slug, ing, nodig: [hoeveelheden], zonderHoeveelheid, recepten: Set van titels,
 // dag: vroegste dag waarop het nodig is (zonder dag: vandaag)}.
-// Varianten van dezelfde soort tellen samen ("Tofu", niet "Tofu (Jumbo)").
-// Regels zonder databasekoppeling ("Pastawater") tellen niet mee.
+// Varianten van dezelfde soort tellen samen ("Tofu", niet "Tofu (Jumbo)"), en wat ergens uit
+// komt telt bij wat je koopt (citroensap bij citroen, zie koopVorm).
+// Regels zonder databasekoppeling ("Pastawater") en water tellen niet mee.
 // Met `onderdelen` worden bewaarde deelrecepten eerst gebruikt; wat daaruit kwam staat
 // daarna in onderdelen.gebruikt.
 export function benodigd(gerechten, data, onderdelen = null) {
@@ -189,15 +211,15 @@ export function benodigd(gerechten, data, onderdelen = null) {
     if (!r) continue;
     const dag = g.dag && g.dag > nu ? g.dag : nu;
     for (const [regel, f] of bladRegels(r, data, g.keuze, factorVoor(r, g.porties), [], onderdelen)) {
-      if (!data.ingredienten[regel.ingredient]) continue;
-      const slug = soortVan(data, regel.ingredient);
-      const ing = ingVan(data, slug);
-      let x = m.get(slug);
-      if (!x) m.set(slug, (x = { slug, ing, nodig: [], zonderHoeveelheid: false, recepten: new Set(), dag }));
+      const k = koopVorm(regel, f, data);
+      if (!k) continue;
+      const ing = ingVan(data, k.slug);
+      let x = m.get(k.slug);
+      if (!x) m.set(k.slug, (x = { slug: k.slug, ing, nodig: [], zonderHoeveelheid: false, recepten: new Set(), dag }));
       if (dag < x.dag) x.dag = dag;
       x.recepten.add(r.titel);
-      if (regel.hoeveelheid == null) x.zonderHoeveelheid = true;
-      else optellen(x.nodig, { hoeveelheid: regel.hoeveelheid * f, eenheid: regel.eenheid }, ing, data.eenheden);
+      if (k.q == null) x.zonderHoeveelheid = true;
+      else optellen(x.nodig, k.q, ing, data.eenheden);
     }
   }
   return m;
@@ -237,17 +259,149 @@ export function verpakkingVan(ing, eenheden) {
   return e ? [e, ing.gram_per[e]] : null;
 }
 
-// Wat er nodig is uitgedrukt in hele verpakkingen ({hoeveelheid: 2, eenheid: "blok"}), of null.
-export function inVerpakkingen(lijst, ing, eenheden) {
-  const v = verpakkingVan(ing, eenheden);
-  if (!v || !lijst.length) return null;
+// De varianten van een soort die als hetzelfde voedsel tellen (alle, behalve wat anders gewogen
+// wordt: bonen "incl. vocht" hebben `eigen_weging` en tellen als eigen soort, zie soortVan).
+export const variantenVan = (data, soort) => Object.keys(data.ingredienten)
+  .filter((x) => data.ingredienten[x].soort === soort && !data.ingredienten[x].eigen_weging);
+
+// Bederft het snel als het open is (kikkererwten, zuivel, verse groente)? Dan is wat na het koken
+// over is uit een geopende verpakking waarschijnlijk weggegooid; pasta of rijst blijft gewoon goed.
+export const BEDERF_DAGEN = 14;
+export const bederftOpen = (ing, data) => bewaren(ing, data).open < BEDERF_DAGEN;
+
+// De verpakkingen waarin je een soort koopt: die van het ingrediënt zelf en van elke variant.
+// [{slug, eenheid, gram, gewoon: wat je normaal koopt}]
+export function verpakkingen(data, soort) {
+  const gen = data.ingredienten[soort];
+  if (!gen) return [];
+  const gewoon = gen.standaard || soort;
+  const uit = [];
+  for (const s of [soort, ...variantenVan(data, soort)]) {
+    // De soort zelf erft de verpakking van zijn standaardvariant: die telt maar één keer.
+    const v = verpakkingVan(s === soort ? gen : ingVan(data, s), data.eenheden);
+    if (v) uit.push({ slug: s, eenheid: v[0], gram: v[1], gewoon: s === gewoon });
+  }
+  return uit.sort((a, b) => b.gewoon - a.gewoon); // wat je normaal koopt eerst
+}
+
+// Wat je het best koopt voor `lijst` (hoeveelheden van een soort): de goedkoopste keuze in hele
+// verpakkingen. Wat open overblijft telt als weggegooid als het snel bederft (bederftOpen), anders
+// houd je het voor later en telt alleen de prijs per kg. Zo goed als gelijk (1%): wat je normaal
+// koopt, dan minder verpakkingen. Zonder prijzen telt elke gram even zwaar.
+// 400 g kikkererwten → 1 pot (400 g) in plaats van 2 pakken (460 g, 60 g bederft);
+// 400 g pasta → de grote zak, als die per kg goedkoper is (de rest blijft goed).
+// Met `gewoonAlleen` alleen wat je normaal koopt (vaste voorraad: "3 pakken").
+// Geeft [{slug, hoeveelheid, eenheid, gram}], of null (geen verpakking bekend, of niet in gram).
+export function besteVerpakking(lijst, soort, data, gewoonAlleen = false) {
+  const opties = verpakkingen(data, soort).filter((v) => !gewoonAlleen || v.gewoon);
+  const ing = ingVan(data, soort);
+  if (!opties.length || !lijst.length || !ing) return null;
   let g = 0;
   for (const q of lijst) {
-    const x = gram(q, ing, eenheden);
+    const x = gram(q, ing, data.eenheden);
     if (x == null) return null;
     g += x;
   }
-  return { hoeveelheid: Math.max(1, Math.ceil(g / v[1] - 0.02)), eenheid: v[0] };
+  // Wat je los koopt (een citroen, een ui): pas een net of zak als je er minstens een hele nodig hebt.
+  if (ing.per_stuk && g < Math.min(...opties.map((v) => v.gram)) * 0.98) return null;
+  const nodig = g * 0.98; // een paar procent te weinig is genoeg
+  const max = (v) => Math.max(1, Math.ceil(nodig / v.gram - 1e-9));
+  const bederft = bederftOpen(ing, data);
+  // Prijs per kg per verpakking (zijn eigen product, anders die van de soort; zonder prijs: 1).
+  const perKg = (v) => ingVan(data, v.slug)?.prijs_per_kg ?? ing.prijs_per_kg ?? 1;
+  let beste = null;
+  const kleiner = (a, b) => (Math.abs(a[0] - b[0]) > 0.01 * Math.max(a[0], b[0]) ? a[0] < b[0]
+    : a[1] !== b[1] ? a[1] < b[1] : a[2] < b[2]);
+  const probeer = (keuze) => {
+    const totaal = keuze.reduce((s, [v, n]) => s + v.gram * n, 0);
+    const prijs = keuze.reduce((s, [v, n]) => s + v.gram * n * perKg(v), 0);
+    // Kosten: alles wat je betaalt als de rest bederft, anders alleen het deel dat je gebruikt.
+    const kosten = bederft ? prijs : (prijs * g) / totaal;
+    const score = [kosten, keuze.every(([v]) => v.gewoon) ? 0 : 1, keuze.reduce((s, [, n]) => s + n, 0)];
+    if (!beste || kleiner(score, beste.score)) beste = { keuze, score };
+  };
+  for (const [i, a] of opties.entries()) {
+    probeer([[a, max(a)]]);
+    for (const b of opties.slice(i + 1)) {
+      for (let na = 1; na < max(a); na++) probeer([[a, na], [b, Math.max(1, Math.ceil((nodig - na * a.gram) / b.gram - 1e-9))]]);
+    }
+  }
+  return beste.keuze.map(([v, n]) => ({ slug: v.slug, hoeveelheid: n, eenheid: v.eenheid, gram: v.gram * n }));
+}
+
+// Geschatte prijs van verpakkingen (uit besteVerpakking), elk met de prijs van zijn eigen product.
+export function prijsVanPakken(pakken, soort, data) {
+  let s = 0;
+  for (const p of pakken) {
+    const prijs = ingVan(data, p.slug)?.prijs_per_kg ?? ingVan(data, soort)?.prijs_per_kg;
+    if (prijs == null) return null;
+    s += (p.gram / 1000) * prijs;
+  }
+  return s;
+}
+
+// De verpakking volgens de Jumbo-link van een ingrediënt, zonder iets op te halen:
+// ".../jumbo-biologische-kikkererwten-405-g-692551PAK" → {eenheid: "pak", gram: 405}. Of null.
+// Een suggestie: bij blikken en potten rekenen recepten met het uitlekgewicht.
+const JUMBO_CODE = { ZK: "zak", TAS: "zak", POT: "pot", PAK: "pak", DS: "pak", STK: "pak", FLS: "fles", CAN: "fles",
+  BAK: "bak", CUP: "bak", BKR: "bak", TRA: "bak", SC: "bak", EM: "bak", BLK: "blik", NET: "net" };
+const LINK_MAAT = { g: 1, gr: 1, gram: 1, kg: 1000, ml: 1, cl: 10, l: 1000, liter: 1000 };
+export function pakVanLink(ing) {
+  const m = /^https:\/\/www\.jumbo\.com\/producten\/(.+)-\d+([A-Z]+)$/.exec(ing?.product || "");
+  if (!m || !JUMBO_CODE[m[2]]) return null;
+  const delen = [...m[1].matchAll(/(?:^|-)(\d+)-?(kg|gram|gr|g|ml|cl|liter|l|stuks|st)(?=-|$)/g)];
+  const d = delen.at(-1);
+  // "40-150g" (van-tot) of "4-x-..." (meerpak): niet te zeggen.
+  if (!d || /(?:^|-)(\d+|x)-$/.test(m[1].slice(0, d.index + (d[0].startsWith("-") ? 1 : 0)))) return null;
+  const n = Number(d[1]);
+  let gram;
+  if (d[2] === "stuks" || d[2] === "st") gram = ing.gram_per?.stuk ? n * ing.gram_per.stuk : null;
+  else gram = n * LINK_MAAT[d[2]] * (["ml", "cl", "l", "liter"].includes(d[2]) ? ing.dichtheid || 1 : 1);
+  if (!(gram > 0)) return null;
+  const eenheid = m[2] === "STK" && ["ml", "cl", "l", "liter"].includes(d[2]) ? "fles" : JUMBO_CODE[m[2]];
+  return { eenheid, gram: Math.round(gram) };
+}
+
+// Alle manieren om een soort te kopen, voor een keuzelijst ("Wat heb je gekocht?"): de
+// verpakkingen van het ingrediënt en zijn varianten, en losse eenheden.
+// [{waarde: "slug|eenheid", slug, eenheid, gram?, tekst, nieuw?}]
+// Met `vrij` (waar ook het gewicht gevraagd en getoond wordt, zoals bij Voorraad): ook een verpakking
+// die alleen uit de Jumbo-link bekend is (nieuw: het gewicht staat al ingevuld, je bevestigt het), en
+// als er nog geen verpakking bekend is elke verpakking (gewicht invullen). Een geraden gewicht wordt
+// dus nooit bewaard zonder dat je het ziet.
+export function verpakkingOpties(data, soort, { vrij = false } = {}) {
+  const s0 = soortVan(data, soort);
+  if (!data.ingredienten[s0]) return [];
+  const g = (x) => toonHoeveelheid([{ hoeveelheid: x, eenheid: "g" }]);
+  const variantNaam = (s) => (s !== s0 ? ` · ${data.ingredienten[s].naam}` : "");
+  const uit = verpakkingen(data, s0).map((v) => ({ slug: v.slug, eenheid: v.eenheid, gram: v.gram,
+    tekst: `${v.eenheid} (${g(v.gram)})${variantNaam(v.slug)}` }));
+  const slugs = [s0, ...variantenVan(data, s0)];
+  for (const s of vrij ? slugs : []) {
+    // Alleen als er nog helemaal geen verpakking bekend is (en niet dubbel met de standaardvariant).
+    const ing = ingVan(data, s);
+    const l = pakVanLink(ing);
+    if (!l || verpakkingVan(ing, data.eenheden) || (s === s0 && data.ingredienten[s0].standaard)) continue;
+    uit.push({ slug: s, eenheid: l.eenheid, gram: l.gram, nieuw: true, tekst: `${l.eenheid} (${g(l.gram)}, volgens Jumbo)${variantNaam(s)}` });
+  }
+  const ing = ingVan(data, s0);
+  if (ing.gram_per?.stuk || ing.per_stuk) uit.push({ slug: s0, eenheid: "stuk", tekst: "stuks" });
+  // ml en l alleen bij iets vloeibaars (dichtheid bekend, of de Jumbo-link noemt ml/liter).
+  const vloeibaar = slugs.some((s) => ingVan(data, s).dichtheid || /-\d+-?(ml|cl|l|liter)(-|$)/.test(ingVan(data, s).product || ""));
+  for (const e of ["g", "kg", ...(vloeibaar ? ["ml", "l"] : [])]) uit.push({ slug: s0, eenheid: e, tekst: e });
+  if (vrij && !uit.some((o) => o.gram && !o.nieuw)) {
+    for (const e of Object.keys(data.eenheden).filter((x) => data.eenheden[x].verpakking && !uit.some((o) => o.eenheid === x))) {
+      uit.push({ slug: s0, eenheid: e, tekst: `${e} (gewicht invullen)` });
+    }
+  }
+  return uit.map((o) => ({ ...o, waarde: `${o.slug}|${o.eenheid}` }));
+}
+
+// De keuze die vooraf geselecteerd staat: een bekende verpakking (van `slug` als die er een
+// heeft), dan een uit de Jumbo-link, dan stuks, dan gram.
+export function eersteOptie(opties, slug = null) {
+  return opties.find((o) => o.slug === slug && o.gram && !o.nieuw) || opties.find((o) => o.gram && !o.nieuw)
+    || opties.find((o) => o.nieuw && o.gram) || opties.find((o) => o.eenheid === "stuk") || opties.find((o) => o.eenheid === "g") || opties[0];
 }
 
 // Gerechten op het menu die gekookt moeten worden (niet: "uit de voorraad" opeten, niet de
@@ -328,12 +482,11 @@ function gekooktVerbruik(data) {
     const r = data.recepten[k.recept];
     if (!r) continue;
     for (const [regel, f] of bladRegels(r, data, k.keuze, factorVoor(r, k.porties))) {
-      if (!data.ingredienten[regel.ingredient]) continue;
-      const s = soortVan(data, regel.ingredient);
-      const g = regel.hoeveelheid == null ? null
-        : gram({ hoeveelheid: regel.hoeveelheid * f, eenheid: regel.eenheid }, ingVan(data, regel.ingredient), data.eenheden);
-      if (!m.has(s)) m.set(s, []);
-      m.get(s).push([k.datum, g ?? SNUFJE]);
+      const x = koopVorm(regel, f, data);
+      if (!x) continue;
+      const g = x.q == null ? null : gram(x.q, x.ing, data.eenheden);
+      if (!m.has(x.slug)) m.set(x.slug, []);
+      m.get(x.slug).push([k.datum, g ?? SNUFJE]);
     }
   }
   verbruikCache.set(lijst, m);
@@ -358,9 +511,16 @@ export function geschatGebruikt(p, data) {
   return g / vol;
 }
 
+// Kruiden en specerijen: hooguit eens per zoveel dagen (na het kopen, of na "nog genoeg") de vraag
+// "nog genoeg?". De schatting is bij potjes grof, en een herinnering af en toe is genoeg.
+export const NAKIJKEN_DAGEN = 30;
+
 // Is deze soort (alle partijen "in huis") naar schatting bijna op? Geeft het geschatte deel, of null.
 export function bijnaOp(partijen, data) {
   if (!partijen.length || partijen.some((p) => p.hoeveelheid != null)) return null;
+  const ing = ingVan(data, soortVan(data, partijen[0].ingredient));
+  if (!ing || ing.altijd_in_huis) return null;
+  if (ing.verwaarloosbaar && partijen.some((p) => (p.geteld || p.gekocht) && dagenTot(p.geteld || p.gekocht) > -NAKIJKEN_DAGEN)) return null;
   const f = partijen.map((p) => geschatGebruikt(p, data));
   if (f.some((x) => x == null)) return null;
   const min = Math.min(...f);
@@ -372,7 +532,9 @@ export function bijnaOp(partijen, data) {
 export const minimumVan = (data, slug) => (data.instellingen.minimum || {})[soortVan(data, slug)] || null;
 
 // De boodschappenlijst: één item per ingrediënt, voor alles op het menu, plus de vaste
-// voorraad aanvullen, plus wat "in huis" is maar naar schatting bijna op (`bijnaOp`).
+// voorraad aanvullen, plus wat "in huis" is maar naar schatting bijna op (`bijnaOp`): dat
+// krijgt status "nakijken" (de vraag "nog genoeg?", nog niet om te kopen).
+// Status per item: "kopen", "nakijken", "genoeg" of "onzeker" (zie vergelijk).
 // Zelfgemaakte onderdelen die al klaarstaan (crispy tofu in de koelkast) gaan eerst; die
 // staan in lijst.onderdelen. Verse dingen die pas later in de week nodig zijn krijgen `later`:
 // de dag vanaf wanneer je ze kunt kopen zonder dat ze bederven.
@@ -405,12 +567,13 @@ export function boodschappenlijst(data) {
     m.get(s).opgemaakt = o.datum;
   }
   for (const x of m.values()) {
+    if (x.ing?.altijd_in_huis) continue; // water
     const partijen = partijenVan(data, x.slug);
     let v = vergelijk(x.nodig, partijen, data);
     const op = bijnaOp(partijen, data);
-    if (op != null) v = { status: "kopen", rest: [], bijnaOp: op };
-    // Niet voor het menu en niets te kopen: hoort niet op deze lijst.
-    if (!x.recepten.size && v.status !== "kopen") continue;
+    if (op != null) v = { status: "nakijken", rest: [], bijnaOp: op };
+    // Niet voor het menu en niets te kopen of na te kijken: hoort niet op deze lijst.
+    if (!x.recepten.size && v.status !== "kopen" && v.status !== "nakijken") continue;
     const houdbaar = bewaren(x.ing, data).dagen;
     const later = v.status === "kopen" && !x.minimum && op == null && dagenTot(x.dag) > houdbaar
       ? plusDagen(x.dag, -houdbaar) : null;
@@ -475,8 +638,10 @@ const opmaakVolgorde = (a, b) => (a.geopend ? 0 : 1) - (b.geopend ? 0 : 1)
   || (a.geopend || a.gekocht || "").localeCompare(b.geopend || b.gekocht || "");
 
 // Haalt `nodig` uit de partijen van één ingrediënt, zoals in een echte keuken: eerst wat al
-// open is, dan de oudste dichte verpakking. Wordt een verpakking (of een ui, een aubergine)
-// maar half gebruikt, dan wordt de rest een open partij, op de plek waar die na openen hoort.
+// open is, dan een dichte verpakking die binnen een paar dagen op moet, dan de dichte partij
+// waarvan het minst open overblijft (400 g kikkererwten: de pot van 400 g, niet twee pakken van
+// 230 g), bij gelijkspel de oudste. Wordt een verpakking (of een ui, een aubergine) maar half
+// gebruikt, dan wordt de rest een open partij, op de plek waar die na openen hoort.
 // De partijen mogen van verschillende merken van dezelfde soort zijn; elke partij rekent met
 // zijn eigen merk. Een zak uien of een net citroenen gaat niet open: die wordt losse stuks
 // (zie uitpakken), en wat in gram over is (aardappelen, wortelen) blijft dicht.
@@ -485,12 +650,35 @@ export function afboeken(partijen, nodig, data, datum = vandaag()) {
   const { eenheden } = data;
   const lijst = partijen.map((p) => ({ ...p }));
   const volgorde = lijst.filter((p) => p.hoeveelheid != null).sort(opmaakVolgorde);
+  const gauw = (p) => { const d = opTegen(p, data); return !!d && dagenTot(d) <= GAUW; };
+  // Hoeveel er (in de eenheid van q) open overblijft als je `rest` uit p haalt, of null als p
+  // het niet alleen kan. Wat open niet bederft (pasta, rijst) telt als 0: dan gewoon de oudste.
+  // Rekent op een kopie: p zelf verandert niet.
+  const openOver = (p, rest, q) => {
+    const ing = ingVan(data, p.ingredient);
+    if (!ing || !(p.hoeveelheid > 0)) return null;
+    const x = { ...p };
+    uitpakken(x, ing, eenheden);
+    const beschikbaar = omrekenen({ hoeveelheid: x.hoeveelheid, eenheid: x.eenheid }, q.eenheid, ing, eenheden);
+    if (beschikbaar == null || beschikbaar < rest - 1e-9) return null;
+    if (!bederftOpen(ing, data)) return 0;
+    if (!telbaar(x.eenheid, eenheden)) return perStuk(ing) ? 0 : beschikbaar - rest;
+    const neemP = (rest / beschikbaar) * x.hoeveelheid;
+    return ((Math.ceil(neemP - 1e-6) - neemP) * beschikbaar) / x.hoeveelheid;
+  };
   let gelukt = false;
   for (const q of nodig) {
     let rest = q.hoeveelheid;
-    for (const p of volgorde) {
-      if (rest <= 1e-9) break;
-      if (!(p.hoeveelheid > 0)) continue;
+    const gehad = new Set();
+    while (rest > 1e-9) {
+      const kandidaten = volgorde.filter((p) => !gehad.has(p) && p.hoeveelheid > 0);
+      let p = kandidaten.find((x) => x.geopend) || kandidaten.find(gauw);
+      if (!p) {
+        const passend = kandidaten.map((x) => [x, openOver(x, rest, q)]).filter(([, o]) => o != null);
+        p = passend.reduce((a, b) => (b[1] < a[1] - 1e-6 ? b : a), passend[0] || [kandidaten[0]])[0];
+      }
+      if (!p) break;
+      gehad.add(p);
       const ing = ingVan(data, p.ingredient);
       if (!ing) continue;
       const b = bewaren(ing, data);
@@ -560,14 +748,16 @@ export function openen(partijen, id, data, datum = vandaag()) {
   return lijst;
 }
 
-// Gekochte boodschappen als nieuwe partij in de voorraad (past `partijen` aan).
+// Gekochte boodschappen als nieuwe partij in de voorraad (past `partijen` aan). `slug` mag een
+// variant zijn (de pot kikkererwten); `plek` leeg = waar het normaal hoort.
 // Komt bij een dichte partij van dezelfde dag, plek en eenheid.
-export function inVoorraad(partijen, slug, gekocht, data, datum = vandaag()) {
+export function inVoorraad(partijen, slug, gekocht, data, datum = vandaag(), plek = null) {
   const { eenheden } = data;
   const ing = ingVan(data, slug);
+  if (ing.altijd_in_huis) return;
   const tellen = ing.verwaarloosbaar ? [] : gekocht.filter((q) => voorraadEenheden(eenheden).includes(q.eenheid));
   const q = tellen.length === 1 && tellen.length === gekocht.length ? tellen[0] : null;
-  const plek = standaardPlek(ing, data);
+  plek ||= standaardPlek(ing, data);
   if (!q) {
     // Hoeveelheid onbekend (een potje kruiden e.d.): "in huis", tenzij er al iets ligt.
     // Ligt het er al zonder hoeveelheid, dan is dit een nieuwe verpakking: opnieuw beginnen met tellen.
